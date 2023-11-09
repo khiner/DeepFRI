@@ -19,3 +19,9 @@ results
 trained_models/*
 newest_trained/*
 alphafold2
+
+build/
+DeepFRI.egg-info/
+*trained_models*
+DeepFRI_MF_pred_scores.json
+DeepFRI_MF_predictions.csv
