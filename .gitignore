@@ -25,3 +25,11 @@ DeepFRI.egg-info/
 *trained_models*
 DeepFRI_MF_pred_scores.json
 DeepFRI_MF_predictions.csv
+
+preprocessing/data/.DS_Store
+preprocessing/data/TFRecords/
+preprocessing/data/bc-95.out
+preprocessing/data/go-basic.obo
+preprocessing/data/pdb_chain_enzyme.tsv.gz
+preprocessing/data/pdb_chain_go.tsv.gz
+preprocessing/data/pdb_seqres.txt.gz
