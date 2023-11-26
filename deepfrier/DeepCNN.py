@@ -10,8 +10,7 @@ plt.switch_backend('agg')
 
 class DeepCNN(object):
     """ Class containig the CNN model for predicting protein function. """
-    def __init__(self, output_dim, n_channels=26, num_filters=[100], filter_lens=[3], lr=0.0002, drop=0.3, l2_reg=0.001,
-                 lm_model_name=None, model_name_prefix=None):
+    def __init__(self, output_dim, n_channels=26, num_filters=[100], filter_lens=[3], lr=0.0002, drop=0.3, l2_reg=0.001, model_name_prefix=None):
         """ Initialize the model
         :param output_dim: {int} number of GO terms/EC numbers
         :param n_channels: {int} number of input features per residue (26 for 1-hot encoding)
@@ -20,35 +19,21 @@ class DeepCNN(object):
         :param lr: {float} learning rate for Adam optimizer
         :param drop: {float} dropout fraction for Dense layers
         :param l2_reg: {float} l2 regularization parameter
-        :lm_model: {string} name of the pre-trained LSTM language model to be loaded
         """
         self.output_dim = output_dim
         self.n_channels = n_channels
         self.model_name_prefix = model_name_prefix
 
-        if lm_model_name is not None:
-            lm_model = tf.keras.models.load_model(lm_model_name)
-            lm_model = tf.keras.Model(inputs=lm_model.input, outputs=lm_model.get_layer("LSTM2").output)
-            lm_model.trainable = False
-        else:
-            lm_model = None
-
         # build and compile model
-        self._build_model(num_filters, filter_lens, n_channels, output_dim, lr, drop, l2_reg, lm_model=lm_model)
+        self._build_model(num_filters, filter_lens, n_channels, output_dim, lr, drop, l2_reg)
 
-    def _build_model(self, num_filters, filter_lens, n_channels, output_dim, lr, drop, l2_reg, lm_model=None):
+    def _build_model(self, num_filters, filter_lens, n_channels, output_dim, lr, drop, l2_reg):
         print ("### Compiling DeepCNN model...")
 
         input_seq = tf.keras.layers.Input(shape=(None, n_channels), name='seq')
 
         # Encoding layers
         x = input_seq
-        if lm_model is not None:
-            x_lm = tf.keras.layers.Dense(128, use_bias=False, name='LM_embedding')(lm_model(x))
-            x_aa = tf.keras.layers.Dense(128, name='AA_embedding')(x)
-            x = tf.keras.layers.Add(name='Emedding')([x_lm, x_aa])
-            x = tf.keras.layers.Activation('relu')(x)
-
         # Conv layers
         x_concat = []
         for l in range(0, len(num_filters)):

@@ -3,17 +3,14 @@ import tensorflow as tf
 
 from .utils import get_batched_dataset
 from .layers import FuncPredictor, SumPooling
-from .layers import ChebConv, GraphConv, SAGEConv, MultiGraphConv, NoGraphConv, GAT
+from .layers import GraphConv
 
-import warnings
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
 
-
 class DeepFRI(object):
-    """ Class containig the GCN + LM models for predicting protein function. """
-    def __init__(self, output_dim, n_channels=26, gc_dims=[64, 128], fc_dims=[512], lr=0.0002, drop=0.3, l2_reg=1e-4,
-                 gc_layer=None, lm_model_name=None, model_name_prefix=None):
+    """ Class containig the GCN for predicting protein function. """
+    def __init__(self, output_dim, n_channels=26, gc_dims=[64, 128], fc_dims=[512], lr=0.0002, drop=0.3, l2_reg=1e-4, model_name_prefix=None):
         """ Initialize the model
         :param output_dim: {int} number of GO terms/EC numbers
         :param n_channels: {int} number of input features per residue (26 for 1-hot encoding)
@@ -21,51 +18,20 @@ class DeepFRI(object):
         :param fc_dims: {list <int>} number of hiddne units in Dense layers
         :param lr: {float} learning rate for Adam optimizer
         :param drop: {float} dropout fraction for Dense layers
-        :param gc_layer: {str} Graph Convolution layer
-        :lm_model: {string} name of the pre-trained LSTM language model to be loaded
         :model_name_prefix: {string} name of a deepFRI model to be saved
         """
         self.output_dim = output_dim
         self.n_channels = n_channels
         self.model_name_prefix = model_name_prefix
 
-        if lm_model_name is not None:
-            lm_model = tf.keras.models.load_model(lm_model_name)
-            lm_model = tf.keras.Model(inputs=lm_model.input,
-                                      outputs=tf.keras.layers.Concatenate()([lm_model.get_layer("LSTM1").output, lm_model.get_layer("LSTM2").output]))
-            lm_model.trainable = False
-        else:
-            lm_model = None
-
         # build and compile model
-        self._build_model(gc_dims, fc_dims, n_channels, output_dim, lr, drop, l2_reg, gc_layer, lm_model=lm_model)
+        self._build_model(gc_dims, fc_dims, n_channels, output_dim, lr, drop, l2_reg)
 
-    def _build_model(self, gc_dims, fc_dims, n_channels, output_dim, lr, drop, l2_reg, gc_layer=None, lm_model=None):
+    def _build_model(self, gc_dims, fc_dims, n_channels, output_dim, lr, drop, l2_reg):
+        self.GConv = GraphConv
+        self.gc_layer = 'GraphConv' # Simplifying to only one type of GC layer.
 
-        if gc_layer == 'NoGraphConv':
-            self.GConv = NoGraphConv
-            self.gc_layer = gc_layer
-        elif gc_layer == 'GAT':
-            self.GConv = GAT
-            self.gc_layer = gc_layer
-        elif gc_layer == 'GraphConv':
-            self.GConv = GraphConv
-            self.gc_layer = gc_layer
-        elif gc_layer == 'MultiGraphConv':
-            self.GConv = MultiGraphConv
-            self.gc_layer = gc_layer
-        elif gc_layer == 'SAGEConv':
-            self.GConv = SAGEConv
-            self.gc_layer = gc_layer
-        elif gc_layer == 'ChebConv':
-            self.GConv = ChebConv
-            self.gc_layer = gc_layer
-        else:
-            self.GConv = NoGraphConv
-            self.gc_layer = 'NoGraphConv'
-            warnings.warn('gc_layer not specified! No GraphConv used!')
-
-        print ("### Compiling DeepFRI model with %s layer..." % (gc_layer))
+        print ("### Compiling DeepFRI model with %s layer..." % (self.gc_layer))
 
         input_cmap = tf.keras.layers.Input(shape=(None, None), name='cmap')
         input_seq = tf.keras.layers.Input(shape=(None, n_channels), name='seq')
@@ -73,9 +39,6 @@ class DeepFRI(object):
         # Encoding layers
         lm_dim = 1024
         x_aa = tf.keras.layers.Dense(lm_dim, use_bias=False, name='AA_embedding')(input_seq)
-        if lm_model is not None:
-            x_lm = tf.keras.layers.Dense(lm_dim, use_bias=True, name='LM_embedding')(lm_model(input_seq))
-            x_aa = tf.keras.layers.Add(name='Embedding')([x_lm, x_aa])
         x = tf.keras.layers.Activation('relu')(x_aa)
 
         # Graph Convolution layer

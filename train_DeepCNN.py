@@ -23,7 +23,6 @@ if __name__ == "__main__":
     parser.add_argument('-pd', '--pad_len', type=int, help="Padd length.")
     parser.add_argument('-ont', '--ontology', type=str, default='mf', choices=['mf', 'bp', 'cc', 'ec'], help="Ontology.")
     parser.add_argument('--model_name', type=str, default='CNN-PDB_MF', help="Name of the CNN model.")
-    parser.add_argument('-lm', '--lm_model_name', type=str, help="Path to the pretraned LSTM-Language Model.")
     parser.add_argument('--train_tfrecord_fn', type=str, default="/mnt/ceph/users/vgligorijevic/ContactMaps/TFRecords/PDB_GO_train", help="Train tfrecords.")
     parser.add_argument('--valid_tfrecord_fn', type=str, default="/mnt/ceph/users/vgligorijevic/ContactMaps/TFRecords/PDB_GO_valid", help="Valid tfrecords.")
     parser.add_argument('--annot_fn', type=str, default="./preprocessing/data/nrPDB-GO_2019.06.18_annot.tsv", help="File (*tsv) with GO term annotations.")
@@ -53,7 +52,7 @@ if __name__ == "__main__":
 
     print ("### Training model: ", args.model_name, " on ", output_dim, " GO terms.")
     model = DeepCNN(num_filters=args.num_filters, filter_lens=args.filter_lens, n_channels=26, output_dim=output_dim,
-                    lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, lm_model_name=args.lm_model_name, model_name_prefix=args.model_name)
+                    lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, model_name_prefix=args.model_name)
 
     model.train(train_tfrecord_fn, valid_tfrecord_fn, epochs=args.epochs, batch_size=args.batch_size, pad_len=args.pad_len, ont=args.ontology)
 

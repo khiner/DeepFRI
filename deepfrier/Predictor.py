@@ -9,7 +9,7 @@ import numpy as np
 import tensorflow as tf
 
 from .utils import load_catalogue, load_FASTA, load_predicted_PDB, seq2onehot
-from .layers import MultiGraphConv, GraphConv, FuncPredictor, SumPooling
+from .layers import GraphConv, FuncPredictor, SumPooling
 
 
 class GradCAM(object):
@@ -57,8 +57,7 @@ class Predictor(object):
 
     def _load_model(self):
         self.model = tf.keras.models.load_model(self.model_prefix + '.hdf5',
-                                                custom_objects={'MultiGraphConv': MultiGraphConv,
-                                                                'GraphConv': GraphConv,
+                                                custom_objects={'GraphConv': GraphConv,
                                                                 'FuncPredictor': FuncPredictor,
                                                                 'SumPooling': SumPooling})
         # load parameters

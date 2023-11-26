@@ -18,13 +18,10 @@ if __name__ == "__main__":
     parser.add_argument('-drop', '--dropout', type=float, default=0.3, help="Dropout rate.")
     parser.add_argument('-l2', '--l2_reg', type=float, default=1e-4, help="L2 regularization coefficient.")
     parser.add_argument('-lr', type=float, default=0.0002, help="Initial learning rate.")
-    parser.add_argument('-gc', '--gc_layer', type=str, choices=['GraphConv', 'MultiGraphConv', 'SAGEConv', 'ChebConv', 'GAT', 'NoGraphConv'],
-                        help="Graph Conv layer.")
     parser.add_argument('-e', '--epochs', type=int, default=200, help="Number of epochs to train.")
     parser.add_argument('-bs', '--batch_size', type=int, default=64, help="Batch size.")
     parser.add_argument('-pd', '--pad_len', type=int, help="Padd length (max len of protein sequences in train set).")
     parser.add_argument('-ont', '--ontology', type=str, default='mf', choices=['mf', 'bp', 'cc', 'ec'], help="Ontology.")
-    parser.add_argument('-lm', '--lm_model_name', type=str, help="Path to the pretraned LSTM-Language Model.")
     parser.add_argument('--cmap_type', type=str, default='ca', choices=['ca', 'cb'], help="Contact maps type.")
     parser.add_argument('--cmap_thresh', type=float, default=10.0, help="Distance cutoff for thresholding contact maps.")
     parser.add_argument('--model_name', type=str, default='GCN-PDB_MF', help="Name of the GCN model.")
@@ -58,8 +55,7 @@ if __name__ == "__main__":
 
     print ("### Training model: ", args.model_name, " on ", output_dim, " GO terms.")
     model = DeepFRI(output_dim=output_dim, n_channels=26, gc_dims=args.gc_dims, fc_dims=args.fc_dims,
-                    lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, gc_layer=args.gc_layer,
-                    lm_model_name=args.lm_model_name, model_name_prefix=args.model_name)
+                    lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, model_name_prefix=args.model_name)
 
     model.train(train_tfrecord_fn, valid_tfrecord_fn, epochs=args.epochs, batch_size=args.batch_size, pad_len=args.pad_len,
                 cmap_type=args.cmap_type, cmap_thresh=args.cmap_thresh, ont=args.ontology, class_weight=None)
