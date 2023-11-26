@@ -25,8 +25,8 @@ if __name__ == "__main__":
     parser.add_argument('--cmap_type', type=str, default='ca', choices=['ca', 'cb'], help="Contact maps type.")
     parser.add_argument('--cmap_thresh', type=float, default=10.0, help="Distance cutoff for thresholding contact maps.")
     parser.add_argument('--model_name', type=str, default='GCN-PDB_MF', help="Name of the GCN model.")
-    parser.add_argument('--train_tfrecord_fn', type=str, default="/mnt/ceph/users/vgligorijevic/ContactMaps/TFRecords/PDB_GO_train", help="Train tfrecords.")
-    parser.add_argument('--valid_tfrecord_fn', type=str, default="/mnt/ceph/users/vgligorijevic/ContactMaps/TFRecords/PDB_GO_valid", help="Valid tfrecords.")
+    parser.add_argument('--train_tfrecord_fn', type=str, default="./preprocessing/data/downloaded/PDB-GO/PDB_GO_train", help="Train tfrecords.")
+    parser.add_argument('--valid_tfrecord_fn', type=str, default="./preprocessing/data/downloaded/PDB-GO/PDB_GO_valid", help="Valid tfrecords.")
     parser.add_argument('--annot_fn', type=str, default="./preprocessing/data/nrPDB-GO_2019.06.18_annot.tsv", help="File (*tsv) with GO term annotations.")
     parser.add_argument('--test_list', type=str, default="./preprocessing/data/nrPDB-GO_2019.06.18_test.csv", help="File with test PDB chains.")
 

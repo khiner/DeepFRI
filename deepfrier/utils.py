@@ -176,7 +176,7 @@ def get_batched_dataset(filenames, batch_size=64, pad_len=1000, n_goterms=347, c
     return dataset
 
 
-def load_catalogue(fn='/mnt/home/dberenberg/ceph/SWISSMODEL_CONTACTMAPS/catalogue.csv'):
+def load_catalogue(fn):
     chain2path = {}
     with open(fn) as tsvfile:
         fRead = csv.reader(tsvfile, delimiter=',')
