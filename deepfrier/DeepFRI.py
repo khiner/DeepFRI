@@ -24,13 +24,9 @@ class DeepFRI(object):
         self.n_channels = n_channels
         self.model_name_prefix = model_name_prefix
 
-        # build and compile model
-        self._build_model(gc_dims, fc_dims, n_channels, output_dim, lr, drop, l2_reg)
-
-    def _build_model(self, gc_dims, fc_dims, n_channels, output_dim, lr, drop, l2_reg):
+        # Build and compile model
         self.GConv = GraphConv
-        self.gc_layer = 'GraphConv' # Simplifying to only one type of GC layer.
-
+        self.gc_layer = 'GraphConv' # Simplifying to use only one type of GC layer for now.
         print ("### Compiling DeepFRI model with %s layer..." % (self.gc_layer))
 
         input_cmap = tf.keras.layers.Input(shape=(None, None), name='cmap')
@@ -41,27 +37,24 @@ class DeepFRI(object):
         x_aa = tf.keras.layers.Dense(lm_dim, use_bias=False, name='AA_embedding')(input_seq)
         x = tf.keras.layers.Activation('relu')(x_aa)
 
-        # Graph Convolution layer
-        gcnn_concat = []
-        for l in range(0, len(gc_dims)):
-            x = self.GConv(gc_dims[l], use_bias=False, activation='elu', kernel_regularizer=tf.keras.regularizers.l2(l2_reg),
-                           name=self.gc_layer + '_' + str(l+1))([x, input_cmap])
-            gcnn_concat.append(x)
+        # Graph convolution layers
+        gcnn_layers = []
+        for l in range(len(gc_dims)):
+            x = self.GConv(
+                gc_dims[l], activation='elu',
+                kernel_regularizer=tf.keras.regularizers.l2(l2_reg),
+                name=f'{self.gc_layer}_{l+1}'
+            )([x, input_cmap])
+            gcnn_layers.append(x)
 
-        if len(gcnn_concat) > 1:
-            x = tf.keras.layers.Concatenate(name='GCNN_concatenate')(gcnn_concat)
-        else:
-            x = gcnn_concat[-1]
-
-        # Sum pooling
+        x = tf.keras.layers.Concatenate(name='GCNN_concatenate')(gcnn_layers) if len(gcnn_layers) > 1 else gcnn_layers[-1]
         x = SumPooling(axis=1, name='SumPooling')(x)
 
         # Dense layers
-        for l in range(0, len(fc_dims)):
+        for l in range(len(fc_dims)):
             x = tf.keras.layers.Dense(units=fc_dims[l], activation='relu')(x)
             x = tf.keras.layers.Dropout((l + 1)*drop)(x)
 
-        # Output layer
         output_layer = FuncPredictor(output_dim=output_dim, name='labels')(x)
 
         self.model = tf.keras.Model(inputs=[input_cmap, input_seq], outputs=output_layer)
@@ -71,7 +64,7 @@ class DeepFRI(object):
         print (self.model.summary())
 
     def train(self, train_tfrecord_fn, valid_tfrecord_fn,
-              epochs=100, batch_size=64, pad_len=1200, cmap_type='ca', cmap_thresh=10.0, ont='mf', class_weight=None):
+              epochs=100, batch_size=64, pad_len=1200, cmap_type='ca', cmap_thresh=10.0, ont='mf'):
 
         n_train_records = sum(1 for f in glob.glob(train_tfrecord_fn) for _ in tf.data.TFRecordDataset(f))
         n_valid_records = sum(1 for f in glob.glob(valid_tfrecord_fn) for _ in tf.data.TFRecordDataset(f))
@@ -106,13 +99,13 @@ class DeepFRI(object):
                                                 save_best_only=True, save_weights_only=True)
 
         # fit model
-        history = self.model.fit(batch_train,
-                                 epochs=epochs,
-                                 validation_data=batch_valid,
-                                 steps_per_epoch=n_train_records//batch_size,
-                                 validation_steps=n_valid_records//batch_size,
-                                 class_weight=class_weight,
-                                 callbacks=[es, mc])
+        history = self.model.fit(
+            batch_train,
+            epochs=epochs,
+            validation_data=batch_valid,
+            steps_per_epoch=n_train_records//batch_size,
+            validation_steps=n_valid_records//batch_size,
+            callbacks=[es, mc])
 
         self.history = history.history
 

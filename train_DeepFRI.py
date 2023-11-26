@@ -11,7 +11,6 @@ from deepfrier.utils import load_GO_annot, load_EC_annot
 
 
 if __name__ == "__main__":
-    # Training settings
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-gcd', '--gc_dims', type=int, default=[128, 128, 256], nargs='+', help="Dimensions of GraphConv layers.")
     parser.add_argument('-fcd', '--fc_dims', type=int, default=[], nargs='+', help="Dimensions of fully connected layers (after GraphConv layers).")
@@ -31,76 +30,61 @@ if __name__ == "__main__":
     parser.add_argument('--test_list', type=str, default="./preprocessing/data/nrPDB-GO_2019.06.18_test.csv", help="File with test PDB chains.")
 
     args = parser.parse_args()
-    print (args)
+    print("### Args:")
+    print(args)
 
-    train_tfrecord_fn = args.train_tfrecord_fn + '*'
-    valid_tfrecord_fn = args.valid_tfrecord_fn + '*'
-
-    # load annotations
-    if args.ontology == 'ec':
-        prot2annot, goterms, gonames, counts = load_EC_annot(args.annot_fn)
-    else:
-        prot2annot, goterms, gonames, counts = load_GO_annot(args.annot_fn)
-    goterms = goterms[args.ontology]
-    gonames = gonames[args.ontology]
+    # Load annotations
+    annot_load_fn = load_EC_annot if args.ontology == 'ec' else load_GO_annot
+    prot2annot, goterms, gonames, counts = annot_load_fn(args.annot_fn)
+    goterms, gonames = goterms[args.ontology], gonames[args.ontology]
     output_dim = len(goterms)
 
-    # computing weights for imbalanced go classes
-    class_sizes = counts[args.ontology]
-    mean_class_size = np.mean(class_sizes)
-    pos_weights = mean_class_size / class_sizes
-    pos_weights = np.maximum(1.0, np.minimum(10.0, pos_weights))
-    pos_weights = np.concatenate([pos_weights.reshape((len(pos_weights), 1)), pos_weights.reshape((len(pos_weights), 1))], axis=-1)
-    pos_weights = {i: {0: pos_weights[i, 0], 1: pos_weights[i, 1]} for i in range(output_dim)}
-
-    print ("### Training model: ", args.model_name, " on ", output_dim, " GO terms.")
+    print(f'###Training model: {args.model_name} on {output_dim} GO terms.')
     model = DeepFRI(output_dim=output_dim, n_channels=26, gc_dims=args.gc_dims, fc_dims=args.fc_dims,
                     lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, model_name_prefix=args.model_name)
-
-    model.train(train_tfrecord_fn, valid_tfrecord_fn, epochs=args.epochs, batch_size=args.batch_size, pad_len=args.pad_len,
-                cmap_type=args.cmap_type, cmap_thresh=args.cmap_thresh, ont=args.ontology, class_weight=None)
-
-    # save models
+    model.train(f'{args.train_tfrecord_fn}*', f'{args.valid_tfrecord_fn}*', epochs=args.epochs, batch_size=args.batch_size, pad_len=args.pad_len,
+                cmap_type=args.cmap_type, cmap_thresh=args.cmap_thresh, ont=args.ontology)
     model.save_model()
     model.plot_losses()
-    # model.load_model()
 
-    # save model params to json
-    with open(args.model_name + "_model_params.json", 'w') as fw:
+    # Save model params to json
+    with open(f'{args.model_name}_model_params.json', 'w') as fw:
         out_params = vars(args)
         out_params['goterms'] = goterms
         out_params['gonames'] = gonames
         json.dump(out_params, fw, indent=1)
 
-    Y_pred = []
-    Y_true = []
+    Y_pred, Y_true = [], []
     proteins = []
     path = '/mnt/home/vgligorijevic/Projects/NewMethods/Contact_maps/DeepFRIer2/preprocessing/data/annot_pdb_chains_npz/'
     with open(args.test_list, mode='r') as csv_file:
         csv_reader = csv.reader(csv_file, delimiter=',')
         next(csv_reader, None)  # header
         for row in csv_reader:
-            prot = row[0]
-            cmap = np.load(path + prot + '.npz')
+            protein = row[0]
+            cmap = np.load(f'{path}{protein}.npz')
             sequence = str(cmap['seqres'])
             Ca_dist = cmap['C_alpha']
 
             A = np.double(Ca_dist < args.cmap_thresh)
             S = seq2onehot(sequence)
 
-            # ##
             S = S.reshape(1, *S.shape)
             A = A.reshape(1, *A.shape)
 
-            # results
-            proteins.append(prot)
+            # Results
+            proteins.append(protein)
             Y_pred.append(model.predict([A, S]).reshape(1, output_dim))
-            Y_true.append(prot2annot[prot][args.ontology].reshape(1, output_dim))
+            Y_true.append(prot2annot[protein][args.ontology].reshape(1, output_dim))
 
-    pickle.dump({'proteins': np.asarray(proteins),
-                 'Y_pred': np.concatenate(Y_pred, axis=0),
-                 'Y_true': np.concatenate(Y_true, axis=0),
-                 'ontology': args.ontology,
-                 'goterms': goterms,
-                 'gonames': gonames},
-                open(args.model_name + '_results.pckl', 'wb'))
+    pickle.dump(
+        {
+            'proteins': np.asarray(proteins),
+            'Y_pred': np.concatenate(Y_pred, axis=0),
+            'Y_true': np.concatenate(Y_true, axis=0),
+            'ontology': args.ontology,
+            'goterms': goterms,
+            'gonames': gonames,
+        },
+        open(f'{args.model_name}_results.pckl', 'wb')
+    )

@@ -5,30 +5,23 @@ class GraphConv(tf.keras.layers.Layer):
          Graph Convolution Layer according to (T. Kipf and M. Welling, ICLR 2017)
     """
 
-    def __init__(self, output_dim, use_bias, activation, kernel_regularizer=None, **kwargs):
+    def __init__(self, output_dim, activation, kernel_regularizer=None, **kwargs):
         super(GraphConv, self).__init__(**kwargs)
 
         self.output_dim = output_dim
         self.activation = tf.keras.activations.get(activation)
-        self.use_bias = use_bias
         self.kernel_regularizer = tf.keras.regularizers.get(kernel_regularizer)
 
     def build(self, input_shape):
         input_dim = input_shape[0][-1]
         kernel_shape = (input_dim, self.output_dim)
 
-        self.kernel = self.add_weight(shape=kernel_shape,
-                                      initializer='glorot_uniform',
-                                      name='kernel',
-                                      regularizer=self.kernel_regularizer,
-                                      trainable=True)
-        if self.use_bias:
-            self.bias = self.add_weight(shape=(self.output_dim,),
-                                        initializer='glorot_uniform',
-                                        name='bias',
-                                        trainable=True)
-        else:
-            self.bias = None
+        self.kernel = self.add_weight(
+            shape=kernel_shape,
+            initializer='glorot_uniform',
+            name='kernel',
+            regularizer=self.kernel_regularizer,
+            trainable=True)
 
     def _normalize(self, A, eps=1e-6):
         n = tf.shape(A)[-1]
@@ -40,10 +33,6 @@ class GraphConv(tf.keras.layers.Layer):
     def call(self, inputs):
         output = tf.keras.backend.batch_dot(self._normalize(inputs[1]), inputs[0])
         output = tf.keras.backend.dot(output, self.kernel)
-
-        if self.use_bias:
-            output = tf.keras.backend.bias_add(output, self.bias)
-
         if self.activation is not None:
             output = self.activation(output)
         return output
@@ -52,7 +41,6 @@ class GraphConv(tf.keras.layers.Layer):
         config = super().get_config().copy()
         config.update({
             'output_dim': self.output_dim,
-            'use_bias': self.use_bias,
             'activation': self.activation,
             'kernel_regularizer': tf.keras.regularizers.serialize(self.kernel_regularizer)
         })
@@ -87,8 +75,7 @@ class SumPooling(tf.keras.layers.Layer):
         self.axis = axis
 
     def call(self, x):
-        x_pool = tf.reduce_sum(x, axis=self.axis)
-        return x_pool
+        return tf.reduce_sum(x, axis=self.axis)
 
     def get_config(self):
         config = super().get_config().copy()
