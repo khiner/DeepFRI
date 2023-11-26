@@ -40,7 +40,6 @@ def load_FASTA(filename):
 
 
 def load_GO_annot(filename):
-    # Load GO annotations
     onts = ['mf', 'bp', 'cc']
     prot2annot = {}
     goterms = {ont: [] for ont in onts}
@@ -80,7 +79,6 @@ def load_GO_annot(filename):
 
 
 def load_EC_annot(filename):
-    # Load EC annotations """
     prot2annot = {}
     with open(filename, mode='r') as tsvfile:
         reader = csv.reader(tsvfile, delimiter='\t')
@@ -97,27 +95,6 @@ def load_EC_annot(filename):
             prot2annot[prot]['ec'][ec_indices] = 1.0
             counts['ec'][ec_indices] += 1
     return prot2annot, ec_numbers, ec_numbers, counts
-
-
-def norm_adj(A, symm=True):
-    #  Normalize adj matrix
-    A += np.eye(A.shape[1])
-    if symm:
-        d = 1.0/np.sqrt(A.sum(axis=1))
-        D = np.diag(d)
-        A = D.dot(A.dot(D))
-    else:
-        A /= A.sum(axis=1)[:, np.newaxis]
-
-    return A
-
-
-def _micro_aupr(y_true, y_test):
-    return average_precision_score(y_true, y_test, average='micro')
-
-
-def micro_aupr(y_true, y_pred):
-    return tf.py_func(_micro_aupr, (y_true, y_pred), tf.double)
 
 
 def seq2onehot(seq):
@@ -177,36 +154,7 @@ def _parse_function_gcn(serialized, n_goterms, channels=26, cmap_type='ca', cmap
     return {'cmap': A_cmap, 'seq': S}, y
 
 
-def _parse_function_cnn(serialized, n_goterms, channels=26, ont='mf'):
-    features = {
-        "seq_1hot": tf.io.VarLenFeature(dtype=tf.float32),
-        ont + "_labels": tf.io.FixedLenFeature([n_goterms], dtype=tf.int64),
-        "L": tf.io.FixedLenFeature([1], dtype=tf.int64),
-    }
-
-    # Parse the serialized data so we get a dict with our data.
-    parsed_example = tf.io.parse_single_example(serialized=serialized, features=features)
-
-    # Get all data
-    L = parsed_example['L'][0]
-
-    S_shape = tf.stack([L, channels])
-    S = parsed_example['seq_1hot']
-    S = tf.cast(S, tf.float32)
-    S = tf.sparse.to_dense(S)
-    S = tf.reshape(S, S_shape)
-
-    labels = parsed_example[ont + '_labels']
-    labels = tf.cast(labels, tf.float32)
-
-    inverse_labels = tf.cast(tf.equal(labels, 0), dtype=tf.float32)  # [batch, classes]
-    y = tf.stack([labels, inverse_labels], axis=-1)  # labels, inverse labels
-    y = tf.reshape(y, shape=[n_goterms, 2])  # [batch, classes, Pos-Neg].
-
-    return S, y
-
-
-def get_batched_dataset(filenames, batch_size=64, pad_len=1000, n_goterms=347, channels=26, gcn=True, cmap_type='ca', cmap_thresh=10.0, ont='mf'):
+def get_batched_dataset(filenames, batch_size=64, pad_len=1000, n_goterms=347, channels=26, cmap_type='ca', cmap_thresh=10.0, ont='mf'):
     # settings to read from all the shards in parallel
     AUTO = tf.data.experimental.AUTOTUNE
     ignore_order = tf.data.Options()
@@ -218,18 +166,11 @@ def get_batched_dataset(filenames, batch_size=64, pad_len=1000, n_goterms=347, c
     dataset = dataset.with_options(ignore_order)
 
     # Parse the serialized data in the TFRecords files.
-    if gcn:
-        dataset = dataset.map(lambda x: _parse_function_gcn(x, n_goterms=n_goterms, channels=channels, cmap_type=cmap_type, cmap_thresh=cmap_thresh, ont=ont))
-    else:
-        dataset = dataset.map(lambda x: _parse_function_cnn(x, n_goterms=n_goterms, channels=channels, ont=ont))
+    dataset = dataset.map(lambda x: _parse_function_gcn(x, n_goterms=n_goterms, channels=channels, cmap_type=cmap_type, cmap_thresh=cmap_thresh, ont=ont))
 
     # Randomizes input using a window of 2000 elements (read into memory)
     dataset = dataset.shuffle(buffer_size=2000 + 3*batch_size)
-    if gcn:
-        dataset = dataset.padded_batch(batch_size, padded_shapes=({'cmap': [pad_len, pad_len], 'seq': [pad_len, channels]}, [None, 2]))
-        # dataset = dataset.padded_batch(batch_size, padded_shapes=({'cmap': [pad_len, pad_len], 'seq': [pad_len, channels]}, [None]))
-    else:
-        dataset = dataset.padded_batch(batch_size, padded_shapes=([pad_len, channels], [None, 2]))
+    dataset = dataset.padded_batch(batch_size, padded_shapes=({'cmap': [pad_len, pad_len], 'seq': [pad_len, channels]}, [None, 2]))
     dataset = dataset.repeat()
 
     return dataset
@@ -239,20 +180,8 @@ def load_catalogue(fn='/mnt/home/dberenberg/ceph/SWISSMODEL_CONTACTMAPS/catalogu
     chain2path = {}
     with open(fn) as tsvfile:
         fRead = csv.reader(tsvfile, delimiter=',')
-        # next(fRead, None)
         for line in fRead:
             pdb_chain = line[0].strip()
             path = line[1].strip()
             chain2path[pdb_chain] = path
     return chain2path
-
-
-if __name__ == "__main__":
-    # from layers import GraphConv
-    # gconv = GraphConv(output_dim=320, use_bias=False, activation='relu')
-    # from DeepFRI import DeepFRI
-    # model = DeepFRI(output_dim=489)
-
-    filenames = '/mnt/ceph/users/vgligorijevic/ContactMaps/TFRecords/PDB_GO_valid*'
-    n_records = sum(1 for f in glob.glob(filenames) for _ in tf.data.TFRecordDataset(f))
-    print ("### Total number of samples=", n_records)
