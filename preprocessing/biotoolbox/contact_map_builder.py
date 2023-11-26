@@ -34,10 +34,7 @@ class ContactMapContainer:
 
 def correct_residue(x, target):
     try:
-        sl = protein_letters_3to1[x.resname]
-        if sl == target:
-            return True
-        return False
+        return target == protein_letters_3to1[x.resname]
     except KeyError:
         return False
 
@@ -74,7 +71,6 @@ class DistanceMapBuilder:
         return self.__atom
 
     def generate_map_for_pdb(self, structure_container):
-
         aligner      = Align.PairwiseAligner()
         contact_maps = ContactMapContainer()
         model        = structure_container.structure[0]
@@ -206,32 +202,8 @@ class DistanceMapBuilder:
     def __residue_list_to_contact_map(self, residue_list, length):
         dist_matrix = self.__calc_dist_matrix(residue_list)
         diag = self.__diagnolize_to_fill_gaps(dist_matrix, length)
-        #contact_map = self.__create_adj(diag, TEN_ANGSTROMS)
         contact_map = diag
         return contact_map
-
-    def __norm_adj(self, A):
-        #  Normalize adj matrix.
-        with np.errstate(divide='ignore'):
-            d = 1.0 / np.sqrt(A.sum(axis=1))
-        d[np.isinf(d)] = 0.0
-
-        # normalize adjacency matrices
-        d = np.diag(d)
-        A = d.dot(A.dot(d))
-
-        return A
-
-    def __create_adj(self, _A, thresh):
-        # Create CMAP from distance
-        A = _A.copy()
-        with np.errstate(invalid='ignore'):
-            A[A <= thresh] = 1.0
-            A[A > thresh] = 0.0
-            A[np.isnan(A)] = 0.0
-            A = self.__norm_adj(A)
-
-        return A
 
     def __calc_residue_dist(self, residue_one, residue_two):
         """Returns the `self.atom` distance between two residues"""
