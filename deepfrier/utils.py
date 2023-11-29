@@ -115,67 +115,6 @@ def seq2onehot(seq):
     return seqs_x
 
 
-def _parse_function_gcn(serialized, n_goterms, channels=26, cmap_type='ca', cmap_thresh=10.0, ont='mf'):
-    features = {
-        cmap_type + '_dist_matrix': tf.io.VarLenFeature(dtype=tf.float32),
-        "seq_1hot": tf.io.VarLenFeature(dtype=tf.float32),
-        ont + "_labels": tf.io.FixedLenFeature([n_goterms], dtype=tf.int64),
-        "L": tf.io.FixedLenFeature([1], dtype=tf.int64)
-    }
-
-    # Parse the serialized data so we get a dict with our data.
-    parsed_example = tf.io.parse_single_example(serialized=serialized, features=features)
-
-    # Get all data
-    L = parsed_example['L'][0]
-
-    A_shape = tf.stack([L, L])
-    A = parsed_example[cmap_type + '_dist_matrix']
-    A = tf.cast(A, tf.float32)
-    A = tf.sparse.to_dense(A)
-    A = tf.reshape(A, A_shape)
-
-    # threshold distances
-    A_cmap = tf.cast(tf.less_equal(A, cmap_thresh), tf.float32)
-
-    S_shape = tf.stack([L, channels])
-    S = parsed_example['seq_1hot']
-    S = tf.cast(S, tf.float32)
-    S = tf.sparse.to_dense(S)
-    S = tf.reshape(S, S_shape)
-
-    labels = parsed_example[ont + '_labels']
-    labels = tf.cast(labels, tf.float32)
-
-    inverse_labels = tf.cast(tf.equal(labels, 0), dtype=tf.float32)  # [batch, classes]
-    y = tf.stack([labels, inverse_labels], axis=-1)  # labels, inverse labels
-    y = tf.reshape(y, shape=[n_goterms, 2])  # [batch, classes, Pos-Neg].
-
-    return {'cmap': A_cmap, 'seq': S}, y
-
-
-def get_batched_dataset(filenames, batch_size=64, pad_len=1000, n_goterms=347, channels=26, cmap_type='ca', cmap_thresh=10.0, ont='mf'):
-    # settings to read from all the shards in parallel
-    AUTO = tf.data.experimental.AUTOTUNE
-    ignore_order = tf.data.Options()
-    ignore_order.experimental_deterministic = False
-
-    # list all files
-    filenames = tf.io.gfile.glob(filenames)
-    dataset = tf.data.TFRecordDataset(filenames, num_parallel_reads=AUTO)
-    dataset = dataset.with_options(ignore_order)
-
-    # Parse the serialized data in the TFRecords files.
-    dataset = dataset.map(lambda x: _parse_function_gcn(x, n_goterms=n_goterms, channels=channels, cmap_type=cmap_type, cmap_thresh=cmap_thresh, ont=ont))
-
-    # Randomizes input using a window of 2000 elements (read into memory)
-    dataset = dataset.shuffle(buffer_size=2000 + 3*batch_size)
-    dataset = dataset.padded_batch(batch_size, padded_shapes=({'cmap': [pad_len, pad_len], 'seq': [pad_len, channels]}, [None, 2]))
-    dataset = dataset.repeat()
-
-    return dataset
-
-
 def load_catalogue(fn):
     chain2path = {}
     with open(fn) as tsvfile:
