@@ -47,8 +47,8 @@ class DeepFRI(nn.Module):
     def train_model(self, device, train_loader, valid_loader, epochs=100):
         for epoch in range(epochs):
             self.train()
-            total_loss, correct_predictions, total_predictions = 0.0, 0, 0
-            for i, (input_cmap, input_seq, labels) in enumerate(train_loader):
+            total_loss, batch_count, correct_predictions, total_predictions = 0.0, 0, 0, 0
+            for input_cmap, input_seq, labels in train_loader:
                 input_cmap, input_seq, labels = input_cmap.to(device), input_seq.to(device), labels.to(device)
                 labels = torch.max(labels, 1)[1]  # Convert one-hot to class indices
 
@@ -63,9 +63,10 @@ class DeepFRI(nn.Module):
                 correct_predictions += (predicted == labels).sum().item()
                 total_predictions += labels.size(0)
 
-                print(f'Epoch [{epoch + 1}/{epochs}], Step [{i + 1}/{len(train_loader)}], Loss: {loss.item()}')
+                batch_count += 1
+                print(f'Epoch [{epoch + 1}/{epochs}], Batch [{batch_count}], Loss: {loss.item()}')
 
-            loss = total_loss / len(train_loader)
+            loss = total_loss / batch_count
             accurary = 100 * correct_predictions / total_predictions
             print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss}, Accuracy: {accurary}%')
             self.history['loss'].append(loss)
@@ -74,7 +75,7 @@ class DeepFRI(nn.Module):
             # Validation
             self.eval()
             with torch.no_grad():
-                total_loss, correct_predictions, total_predictions = 0.0, 0, 0
+                total_loss, batch_count, correct_predictions, total_predictions = 0.0, 0, 0, 0
                 for input_cmap, input_seq, labels in valid_loader:
                     input_cmap, input_seq, labels = input_cmap.to(device), input_seq.to(device), labels.to(device)
                     labels = torch.max(labels, 1)[1] # Convert one-hot to class indices
@@ -86,8 +87,9 @@ class DeepFRI(nn.Module):
                     _, predicted = torch.max(outputs, 1) # Predicted class indices
                     correct_predictions += (predicted == labels).sum().item()
                     total_predictions += labels.size(0)
+                    batch_count += 1
 
-                val_loss = total_loss / len(valid_loader)
+                val_loss = total_loss / batch_count
                 vall_accuracy = 100 * correct_predictions / total_predictions
                 print(f'Validation - Epoch [{epoch + 1}/{epochs}]: Loss: {val_loss}, Accuracy: {vall_accuracy}%')
                 self.history['val_loss'].append(val_loss)

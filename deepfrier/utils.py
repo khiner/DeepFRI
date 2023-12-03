@@ -1,7 +1,5 @@
 import csv
-import glob
 import numpy as np
-import tensorflow as tf
 from sklearn.metrics import average_precision_score
 
 from Bio import SeqIO
