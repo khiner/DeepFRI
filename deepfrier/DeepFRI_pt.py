@@ -138,11 +138,10 @@ class DeepFRI(nn.Module):
 
         for epoch in range(epochs):
             self.train()
-            i, total_loss = 0, 0.0
-            for input_cmap, input_seq, labels in train_loader:
-                input_cmap = input_cmap.to(device)
-                input_seq = input_seq.to(device)
-                labels = labels.to(device)
+            total_loss = 0.0
+            for i, (input_cmap, input_seq, labels) in enumerate(train_loader):
+                input_cmap, input_seq, labels = input_cmap.to(device), input_seq.to(device), labels.to(device)
+                labels = torch.max(labels, 1)[1]  # Convert one-hot to class indices
 
                 self.optimizer.zero_grad()
                 outputs = self(input_cmap, input_seq)
@@ -150,28 +149,31 @@ class DeepFRI(nn.Module):
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()
-                i += 1
-                print(f'Epoch [{epoch + 1}/{epochs}], Step [{i}/{len(train_loader)}], Loss: {loss.item()}')
+
+                print(f'Epoch [{epoch + 1}/{epochs}], Step [{i + 1}/{len(train_loader)}], Loss: {loss.item()}')
 
             print(f'Epoch [{epoch + 1}/{epochs}], Loss: {total_loss / len(train_loader)}')
 
             # Validation
             self.eval()
             with torch.no_grad():
-                correct = 0
-                total = 0
+                validation_loss, correct_predictions, total_predictions = 0.0, 0, 0
                 for input_cmap, input_seq, labels in valid_loader:
-                    input_cmap = input_cmap.to(device)
-                    input_seq = input_seq.to(device)
-                    labels = labels.to(device)
+                    input_cmap, input_seq, labels = input_cmap.to(device), input_seq.to(device), labels.to(device)
+                    labels = torch.max(labels, 1)[1] # Convert one-hot to class indices
 
                     outputs = self(input_cmap, input_seq)
-                    _, predicted = torch.max(outputs.data, 1)
-                    _, true = torch.max(labels.data, 1)
-                    total += true.size(0)
-                    correct += (predicted == true).sum().item()
+                    loss = self.criterion(outputs, labels)
+                    validation_loss += loss.item()
 
-            print(f'Validation Accuracy: {100 * correct / total}%')
+                    _, predicted = torch.max(outputs, 1) # Get the predicted class indices
+                    correct_predictions += (predicted == labels).sum().item()
+                    total_predictions += labels.size(0)
+
+                avg_validation_loss = validation_loss / len(valid_loader)
+                validation_accuracy = 100 * correct_predictions / total_predictions
+
+                print(f'Validation - Epoch [{epoch + 1}/{epochs}]: Average Loss: {avg_validation_loss}, Accuracy: {validation_accuracy}%')
 
             # Save model checkpoint
             if self.model_name_prefix:

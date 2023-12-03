@@ -47,8 +47,7 @@ class FuncPredictor(nn.Module):
     def forward(self, x):
         x = self.output_layer(x)
         x = x.view(-1, self.output_dim, 2)
-        out = F.softmax(x, dim=-1)
-        return out
+        return x # PyTorch's CrossEntropyLoss expects logits
 
 class SumPooling(nn.Module):
     def __init__(self, axis):
