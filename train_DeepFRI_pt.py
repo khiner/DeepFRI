@@ -5,25 +5,17 @@ import pickle
 import argparse
 
 import numpy as np
-import tensorflow as tf
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from torchdata.datapipes.iter import FileLister, FileOpener
-
+from functools import partial
 
 from deepfrier.DeepFRI_pt import DeepFRI
 from deepfrier.utils import seq2onehot
 from deepfrier.utils import load_GO_annot, load_EC_annot
 
-def parse_tfrecord(serialized, n_goterms, channels, cmap_type, cmap_thresh, ont):
-    features = {
-        f'{cmap_type}_dist_matrix': tf.io.VarLenFeature(dtype=tf.float32),
-        'seq_1hot': tf.io.VarLenFeature(dtype=tf.float32),
-        f'{ont}_labels': tf.io.FixedLenFeature([n_goterms], dtype=tf.int64),
-        'L': tf.io.FixedLenFeature([1], dtype=tf.int64)
-    }
-
+def parse_tfrecord(serialized, channels, cmap_type, cmap_thresh, ont):
     parsed_example = serialized
     L = parsed_example['L'][0].numpy()
 
@@ -40,53 +32,11 @@ def parse_tfrecord(serialized, n_goterms, channels, cmap_type, cmap_thresh, ont)
 
     return torch.tensor(A_cmap, dtype=torch.float32), torch.tensor(S, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
-class TFRecordDataset(Dataset):
-    def __init__(self, filenames, n_goterms, channels, cmap_type, cmap_thresh, ont):
-        self.filenames = tf.io.gfile.glob(filenames)
-        self.n_goterms = n_goterms
-        self.channels = channels
-        self.cmap_type = cmap_type
-        self.cmap_thresh = cmap_thresh
-        self.ont = ont
-        self.indexes = self._create_indexes()
-
-    def _create_indexes(self):
-        indexes = []
-        total_count = 0
-        for filename in self.filenames:
-            count = sum(1 for _ in tf.data.TFRecordDataset(filename))
-            indexes.append((filename, total_count, total_count + count))
-            total_count += count
-        return indexes
-
-    def _get_record(self, global_idx):
-        for filename, start_idx, end_idx in self.indexes:
-            if start_idx <= global_idx < end_idx:
-                local_idx = global_idx - start_idx
-                record = next(iter(tf.data.TFRecordDataset(filename).skip(local_idx).take(1)))
-                return parse_tfrecord(record, self.n_goterms, self.channels, self.cmap_type, self.cmap_thresh, self.ont)
-        raise IndexError('Index out of dataset range')
-
-    def __len__(self):
-        return self.indexes[-1][-1] if self.indexes else 0
-
-    def __getitem__(self, idx):
-        cmap, seq, label = self._get_record(idx)
-        return torch.tensor(cmap, dtype=torch.float32), torch.tensor(seq, dtype=torch.float32), torch.tensor(label, dtype=torch.float32)
-
-
-def get_dataset(filenames, n_goterms=347, channels=26, cmap_type='ca', cmap_thresh=10.0, ont='mf'):
-    length = 0
-
-    datapipe1 = FileLister(filenames, "*.tfrecords")
-    datapipe2 = FileOpener(datapipe1, mode="b")
-
-    for _ in datapipe2:
-        length += 1
-    
-    tfrecord_loader_dp = datapipe2.load_from_tfrecord(length=length)
-    tfrecord_loader_dp = tfrecord_loader_dp.map(lambda x: parse_tfrecord(x, n_goterms, channels, cmap_type, cmap_thresh, ont))
-
+def get_dataset(filenames, parse_fn):
+    file_listener = FileLister(filenames, '*.tfrecords')
+    file_opener = FileOpener(file_listener, mode='b')
+    length = sum(1 for _ in file_opener)
+    tfrecord_loader_dp = file_opener.load_from_tfrecord(length=length).map(parse_fn)
     return tfrecord_loader_dp
 
 
@@ -141,10 +91,11 @@ if __name__ == "__main__":
     batch_size, n_channels = args.batch_size, 26
     pad_len, cmap_type, cmap_thresh, ont = args.pad_len, args.cmap_type, args.cmap_thresh, args.ontology
 
-    train_datapipe = get_dataset(f'{args.train_tfrecord_fn}', output_dim, n_channels, cmap_type, cmap_thresh, ont)
-    valid_datapipe = get_dataset(f'{args.valid_tfrecord_fn}', output_dim, n_channels, cmap_type, cmap_thresh, ont)
+    parse_fn = partial(parse_tfrecord, channels=n_channels, cmap_type=cmap_type, cmap_thresh=cmap_thresh, ont=ont)
+    train_datapipe = get_dataset(f'{args.train_tfrecord_fn}', parse_fn)
+    valid_datapipe = get_dataset(f'{args.valid_tfrecord_fn}', parse_fn)
 
-    train_loader = DataLoader(dataset=train_datapipe, batch_size=batch_size, shuffle=True, collate_fn=pad_batch, num_workers=4)
+    train_loader = DataLoader(dataset=train_datapipe, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
     valid_loader = DataLoader(dataset=valid_datapipe, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
 
     if torch.backends.mps.is_available():
