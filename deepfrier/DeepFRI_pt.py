@@ -119,6 +119,7 @@ class DeepFRI(nn.Module):
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, betas=(0.95, 0.99), weight_decay=l2_reg)
         self.criterion = nn.CrossEntropyLoss()
+        self.history = {'loss': [], 'val_loss': [], 'acc': [], 'val_acc': []}
 
     def forward(self, input_cmap, input_seq):
         x = input_seq
@@ -138,7 +139,7 @@ class DeepFRI(nn.Module):
 
         for epoch in range(epochs):
             self.train()
-            total_loss = 0.0
+            total_loss, correct_predictions, total_predictions = 0.0, 0, 0
             for i, (input_cmap, input_seq, labels) in enumerate(train_loader):
                 input_cmap, input_seq, labels = input_cmap.to(device), input_seq.to(device), labels.to(device)
                 labels = torch.max(labels, 1)[1]  # Convert one-hot to class indices
@@ -150,30 +151,39 @@ class DeepFRI(nn.Module):
                 self.optimizer.step()
                 total_loss += loss.item()
 
+                _, predicted = torch.max(outputs, 1)  # Predicted class indices
+                correct_predictions += (predicted == labels).sum().item()
+                total_predictions += labels.size(0)
+
                 print(f'Epoch [{epoch + 1}/{epochs}], Step [{i + 1}/{len(train_loader)}], Loss: {loss.item()}')
 
-            print(f'Epoch [{epoch + 1}/{epochs}], Loss: {total_loss / len(train_loader)}')
+            loss = total_loss / len(train_loader)
+            accurary = 100 * correct_predictions / total_predictions
+            print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss}, Accuracy: {accurary}%')
+            self.history['loss'].append(loss)
+            self.history['acc'].append(accurary)
 
             # Validation
             self.eval()
             with torch.no_grad():
-                validation_loss, correct_predictions, total_predictions = 0.0, 0, 0
+                total_loss, correct_predictions, total_predictions = 0.0, 0, 0
                 for input_cmap, input_seq, labels in valid_loader:
                     input_cmap, input_seq, labels = input_cmap.to(device), input_seq.to(device), labels.to(device)
                     labels = torch.max(labels, 1)[1] # Convert one-hot to class indices
 
                     outputs = self(input_cmap, input_seq)
                     loss = self.criterion(outputs, labels)
-                    validation_loss += loss.item()
+                    total_loss += loss.item()
 
-                    _, predicted = torch.max(outputs, 1) # Get the predicted class indices
+                    _, predicted = torch.max(outputs, 1) # Predicted class indices
                     correct_predictions += (predicted == labels).sum().item()
                     total_predictions += labels.size(0)
 
-                avg_validation_loss = validation_loss / len(valid_loader)
-                validation_accuracy = 100 * correct_predictions / total_predictions
-
-                print(f'Validation - Epoch [{epoch + 1}/{epochs}]: Average Loss: {avg_validation_loss}, Accuracy: {validation_accuracy}%')
+                val_loss = total_loss / len(valid_loader)
+                vall_accuracy = 100 * correct_predictions / total_predictions
+                print(f'Validation - Epoch [{epoch + 1}/{epochs}]: Loss: {val_loss}, Accuracy: {vall_accuracy}%')
+                self.history['val_loss'].append(val_loss)
+                self.history['val_acc'].append(vall_accuracy)
 
             # Save model checkpoint
             if self.model_name_prefix:
@@ -185,7 +195,6 @@ class DeepFRI(nn.Module):
             output = self(input_cmap, input_seq)
             return output.numpy()[0][:, 0]
 
-    # TODO - implement loss/acc history
     def plot_losses(self):
         plt.switch_backend('agg')
         plt.figure()
