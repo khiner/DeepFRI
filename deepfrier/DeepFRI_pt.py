@@ -51,7 +51,6 @@ def pad_batch(batch):
 
     return cmaps_padded, seqs_padded, labels
 
-
 class TFRecordDataset(Dataset):
     def __init__(self, filenames, n_goterms, channels, cmap_type, cmap_thresh, ont):
         self.filenames = tf.io.gfile.glob(filenames)
@@ -60,19 +59,30 @@ class TFRecordDataset(Dataset):
         self.cmap_type = cmap_type
         self.cmap_thresh = cmap_thresh
         self.ont = ont
-        self.data = []
+        self.indexes = self._create_indexes()
 
+    def _create_indexes(self):
+        indexes = []
+        total_count = 0
         for filename in self.filenames:
-            raw_dataset = tf.data.TFRecordDataset(filename)
-            for raw_record in raw_dataset:
-                cmap, seq, label = parse_tfrecord(raw_record, n_goterms, channels, cmap_type, cmap_thresh, ont)
-                self.data.append((cmap, seq, label))
+            count = sum(1 for _ in tf.data.TFRecordDataset(filename))
+            indexes.append((filename, total_count, total_count + count))
+            total_count += count
+        return indexes
+
+    def _get_record(self, global_idx):
+        for filename, start_idx, end_idx in self.indexes:
+            if start_idx <= global_idx < end_idx:
+                local_idx = global_idx - start_idx
+                record = next(iter(tf.data.TFRecordDataset(filename).skip(local_idx).take(1)))
+                return parse_tfrecord(record, self.n_goterms, self.channels, self.cmap_type, self.cmap_thresh, self.ont)
+        raise IndexError('Index out of dataset range')
 
     def __len__(self):
-        return len(self.data)
+        return self.indexes[-1][-1] if self.indexes else 0
 
     def __getitem__(self, idx):
-        cmap, seq, label = self.data[idx]
+        cmap, seq, label = self._get_record(idx)
         return torch.tensor(cmap, dtype=torch.float32), torch.tensor(seq, dtype=torch.float32), torch.tensor(label, dtype=torch.float32)
 
 
