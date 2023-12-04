@@ -8,8 +8,9 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
-from torchdata.datapipes.iter import FileLister, FileOpener
+from torchdata.datapipes.iter import FileLister, FileOpener, IterDataPipe
 from functools import partial
+import tensorflow as tf
 
 from deepfrier.DeepFRI_pt import DeepFRI
 from deepfrier.utils import seq2onehot
@@ -33,10 +34,15 @@ def parse_tfrecord(serialized, channels, cmap_type, cmap_thresh, ont):
     return torch.tensor(A_cmap, dtype=torch.float32), torch.tensor(S, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
 def get_dataset(filenames, parse_fn):
+    tf_files = tf.io.gfile.glob(f'{filenames}/*')
+    total_length = 0
+    for filename in tf_files:
+            length = sum(1 for _ in tf.data.TFRecordDataset(filename))
+            total_length += length
+
     file_listener = FileLister(filenames, '*.tfrecords')
     file_opener = FileOpener(file_listener, mode='b')
-    length = sum(1 for _ in file_opener)
-    tfrecord_loader_dp = file_opener.load_from_tfrecord(length=length).map(parse_fn)
+    tfrecord_loader_dp = file_opener.load_from_tfrecord(length=total_length).map(parse_fn)
     return tfrecord_loader_dp
 
 
@@ -91,11 +97,12 @@ if __name__ == "__main__":
     batch_size, n_channels = args.batch_size, 26
     pad_len, cmap_type, cmap_thresh, ont = args.pad_len, args.cmap_type, args.cmap_thresh, args.ontology
 
+    print('### Preprocessing Data')
     parse_fn = partial(parse_tfrecord, channels=n_channels, cmap_type=cmap_type, cmap_thresh=cmap_thresh, ont=ont)
     train_datapipe = get_dataset(f'{args.train_tfrecord_fn}', parse_fn)
     valid_datapipe = get_dataset(f'{args.valid_tfrecord_fn}', parse_fn)
 
-    train_loader = DataLoader(dataset=train_datapipe, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
+    train_loader = DataLoader(dataset=train_datapipe, batch_size=batch_size, shuffle=True, collate_fn=pad_batch, num_workers=4)
     valid_loader = DataLoader(dataset=valid_datapipe, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
 
     if torch.backends.mps.is_available():
