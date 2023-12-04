@@ -63,7 +63,7 @@ class DeepFRI(nn.Module):
                 correct_predictions += (predicted == labels).sum().item()
                 total_predictions += labels.size(0)
 
-                print(f'Epoch [{epoch + 1}/{epochs}], Batch [{i} / {len(train_loader.dataset)}], Loss: {loss.item()}')
+                print(f'Epoch [{epoch + 1}/{epochs}], Batch [{i} / {len(train_loader)}], Loss: {loss.item()}')
 
             loss = total_loss / len(train_loader)
             accurary = 100 * correct_predictions / total_predictions
@@ -87,7 +87,7 @@ class DeepFRI(nn.Module):
                     correct_predictions += (predicted == labels).sum().item()
                     total_predictions += labels.size(0)
 
-                val_loss = total_loss / len(valid_loader.dataset)
+                val_loss = total_loss / len(valid_loader)
                 val_accuracy = 100 * correct_predictions / total_predictions
                 print(f'Validation - Epoch [{epoch + 1}/{epochs}]: Loss: {val_loss}, Accuracy: {val_accuracy}%')
                 self.history['val_loss'].append(val_loss)

@@ -4,47 +4,52 @@ import os
 import pickle
 import argparse
 
+import h5py
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, IterableDataset
 from torch.nn.utils.rnn import pad_sequence
-from torchdata.datapipes.iter import FileLister, FileOpener, IterDataPipe
-from functools import partial
-import tensorflow as tf
 
 from deepfrier.DeepFRI_pt import DeepFRI
 from deepfrier.utils import seq2onehot
 from deepfrier.utils import load_GO_annot, load_EC_annot
 
-def parse_tfrecord(serialized, channels, cmap_type, cmap_thresh, ont):
-    parsed_example = serialized
-    L = parsed_example['L'][0].numpy()
+def load_hdf5(filename, cmap_type, cmap_thresh, ont, channels):
+    with h5py.File(filename, 'r') as hdf5_file:
+        # Assuming dataset names in HDF5 file match the TFRecord feature names
+        num_records = hdf5_file['L'].shape[0]
 
-    A = parsed_example[f'{cmap_type}_dist_matrix'].to_dense().numpy()
-    A = A.reshape(L, L)
-    A_cmap = (A <= cmap_thresh).astype(np.float32)
+        for i in range(num_records):
+            L = hdf5_file['L'][i][0]
 
-    S = parsed_example['seq_1hot'].to_dense().numpy()
-    S = S.reshape(L, channels)
+            A = hdf5_file[f'{cmap_type}_dist_matrix'][i][:L*L]
+            A = A.reshape(L, L)
+            A_cmap = (A <= cmap_thresh).astype(np.float32)
 
-    labels = parsed_example[f'{ont}_labels'].numpy().astype(np.float32)
-    inverse_labels = (labels == 0).astype(np.float32)
-    y = np.stack([labels, inverse_labels], axis=-1)
+            S = hdf5_file['seq_1hot'][i][:L*channels]
+            S = S.reshape(L, channels)
 
-    return torch.tensor(A_cmap, dtype=torch.float32), torch.tensor(S, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
+            labels = hdf5_file[f'{ont}_labels'][i]
+            inverse_labels = (labels == 0).astype(np.float32)
+            y = np.stack([labels, inverse_labels], axis=-1)
 
-def get_dataset(filenames, parse_fn):
-    tf_files = tf.io.gfile.glob(f'{filenames}/*')
-    total_length = 0
-    for filename in tf_files:
-            length = sum(1 for _ in tf.data.TFRecordDataset(filename))
-            total_length += length
+            yield torch.tensor(A_cmap, dtype=torch.float32), torch.tensor(S, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
-    file_listener = FileLister(filenames, '*.tfrecords')
-    file_opener = FileOpener(file_listener, mode='b')
-    tfrecord_loader_dp = file_opener.load_from_tfrecord(length=total_length).map(parse_fn)
-    return tfrecord_loader_dp
+class HDF5Dataset(IterableDataset):
+    def __init__(self, filename, cmap_type, cmap_thresh, ont, channels):
+        self.filename = filename
+        self.cmap_type = cmap_type
+        self.cmap_thresh = cmap_thresh
+        self.ont = ont
+        self.channels = channels
+        with h5py.File(self.filename, 'r') as hdf5_file:
+            self.num_records = hdf5_file['L'].shape[0]
 
+    def __iter__(self):
+        return load_hdf5(self.filename, self.cmap_type, self.cmap_thresh, self.ont, self.channels)
+
+    def __len__(self):
+        return self.num_records
 
 def pad_tensors(tensors):
     """Pad a list of tensors to the same size in the first two dimensions. """
@@ -79,8 +84,8 @@ if __name__ == "__main__":
     parser.add_argument('--cmap_type', type=str, default='ca', choices=['ca', 'cb'], help="Contact maps type.")
     parser.add_argument('--cmap_thresh', type=float, default=10.0, help="Distance cutoff for thresholding contact maps.")
     parser.add_argument('--model_name', type=str, default='GCN-PDB_MF', help="Name of the GCN model.")
-    parser.add_argument('--train_tfrecord_fn', type=str, default="./preprocessing/data/downloaded/PDB-GO/PDB_GO_train", help="Train tfrecords.")
-    parser.add_argument('--valid_tfrecord_fn', type=str, default="./preprocessing/data/downloaded/PDB-GO/PDB_GO_valid", help="Valid tfrecords.")
+    parser.add_argument('--train_hdf5_file', type=str, default="./preprocessing/data/downloaded/PDB-GO-TRAIN/pdb_go_train.hdf5", help="Train HDF5 file.")
+    parser.add_argument('--valid_hdf5_file', type=str, default="./preprocessing/data/downloaded/PDB-GO-VALID/pdb_go_valid.hdf5", help="Valid HDF5 file.")
     parser.add_argument('--annot_fn', type=str, default="./preprocessing/data/nrPDB-GO_2019.06.18_annot.tsv", help="File (*tsv) with GO term annotations.")
     parser.add_argument('--test_list', type=str, default="./preprocessing/data/nrPDB-GO_2019.06.18_test.csv", help="File with test PDB chains.")
 
@@ -98,12 +103,11 @@ if __name__ == "__main__":
     pad_len, cmap_type, cmap_thresh, ont = args.pad_len, args.cmap_type, args.cmap_thresh, args.ontology
 
     print('### Preprocessing Data')
-    parse_fn = partial(parse_tfrecord, channels=n_channels, cmap_type=cmap_type, cmap_thresh=cmap_thresh, ont=ont)
-    train_datapipe = get_dataset(f'{args.train_tfrecord_fn}', parse_fn)
-    valid_datapipe = get_dataset(f'{args.valid_tfrecord_fn}', parse_fn)
+    train_dataset = HDF5Dataset(args.train_hdf5_file, cmap_type, cmap_thresh, ont, n_channels)
+    valid_dataset = HDF5Dataset(args.valid_hdf5_file, cmap_type, cmap_thresh, ont, n_channels)
 
-    train_loader = DataLoader(dataset=train_datapipe, batch_size=batch_size, shuffle=True, collate_fn=pad_batch, num_workers=4)
-    valid_loader = DataLoader(dataset=valid_datapipe, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
 
     if torch.backends.mps.is_available():
         device = torch.device('mps')
