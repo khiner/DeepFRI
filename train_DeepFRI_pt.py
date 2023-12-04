@@ -7,35 +7,14 @@ import argparse
 import h5py
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 
 from deepfrier.DeepFRI_pt import DeepFRI
 from deepfrier.utils import seq2onehot
 from deepfrier.utils import load_GO_annot, load_EC_annot
 
-def load_hdf5(filename, cmap_type, cmap_thresh, ont, channels):
-    with h5py.File(filename, 'r') as hdf5_file:
-        # Assuming dataset names in HDF5 file match the TFRecord feature names
-        num_records = hdf5_file['L'].shape[0]
-
-        for i in range(num_records):
-            L = hdf5_file['L'][i][0]
-
-            A = hdf5_file[f'{cmap_type}_dist_matrix'][i]
-            A = A.reshape(L, L)
-            A_cmap = (A <= cmap_thresh).astype(np.float32)
-
-            S = hdf5_file['seq_1hot'][i]
-            S = S.reshape(L, channels)
-
-            labels = hdf5_file[f'{ont}_labels'][i]
-            inverse_labels = (labels == 0).astype(np.float32)
-            y = np.stack([labels, inverse_labels], axis=-1)
-
-            yield torch.tensor(A_cmap, dtype=torch.float32), torch.tensor(S, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
-
-class HDF5Dataset(IterableDataset):
+class HDF5Dataset(Dataset):
     def __init__(self, filename, cmap_type, cmap_thresh, ont, channels):
         self.filename = filename
         self.cmap_type = cmap_type
@@ -45,8 +24,22 @@ class HDF5Dataset(IterableDataset):
         with h5py.File(self.filename, 'r') as hdf5_file:
             self.num_records = hdf5_file['L'].shape[0]
 
-    def __iter__(self):
-        return load_hdf5(self.filename, self.cmap_type, self.cmap_thresh, self.ont, self.channels)
+    def __getitem__(self, i):
+        with h5py.File(self.filename, 'r') as hdf5_file:
+            L = hdf5_file['L'][i][0]
+
+            A = hdf5_file[f'{self.cmap_type}_dist_matrix'][i]
+            A = A.reshape(L, L)
+            A_cmap = (A <= self.cmap_thresh).astype(np.float32)
+
+            S = hdf5_file['seq_1hot'][i]
+            S = S.reshape(L, self.channels)
+
+            labels = hdf5_file[f'{self.ont}_labels'][i]
+            inverse_labels = (labels == 0).astype(np.float32)
+            y = np.stack([labels, inverse_labels], axis=-1)
+
+            return torch.tensor(A_cmap, dtype=torch.float32), torch.tensor(S, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
     def __len__(self):
         return self.num_records
@@ -106,7 +99,7 @@ if __name__ == "__main__":
     train_dataset = HDF5Dataset(args.train_hdf5_file, cmap_type, cmap_thresh, ont, n_channels)
     valid_dataset = HDF5Dataset(args.valid_hdf5_file, cmap_type, cmap_thresh, ont, n_channels)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=pad_batch, num_workers=4)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
 
     if torch.backends.mps.is_available():
