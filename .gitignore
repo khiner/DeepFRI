@@ -34,3 +34,5 @@ preprocessing/data/pdb_chain_enzyme.tsv.gz
 preprocessing/data/pdb_chain_go.tsv.gz
 preprocessing/data/pdb_seqres.txt.gz
 preprocessing/data/downloaded
+
+checkpoints/

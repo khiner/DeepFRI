@@ -114,7 +114,7 @@ if __name__ == "__main__":
     model = DeepFRI(output_dim=output_dim, n_channels=n_channels, gc_dims=args.gc_dims, fc_dims=args.fc_dims,
                     lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, model_name_prefix=args.model_name).to(device)
     model.train_model(device, train_loader, valid_loader, epochs=args.epochs)
-    model.save_model()
+    model.save_model('final')
     model.plot_losses()
 
     # Save model params to json
@@ -123,44 +123,3 @@ if __name__ == "__main__":
         out_params['goterms'] = goterms
         out_params['gonames'] = gonames
         json.dump(out_params, fw, indent=1)
-
-    # Use trained model for prediction
-    Y_pred, Y_true = [], []
-    proteins = []
-    cmaps_path = './examples/pdb_cmaps'
-    with open(args.test_list, mode='r') as csv_file:
-        csv_reader = csv.reader(csv_file, delimiter=',')
-        next(csv_reader, None)  # header
-        for row in csv_reader:
-            protein = row[0]
-            cmap_path = f'{cmaps_path}/{protein}.npz'
-            if not os.path.isfile(cmap_path):
-                print(f'### Skipping {protein}: No cmap found.')
-                continue
-
-            cmap = np.load(cmap_path)
-            sequence = str(cmap['seqres'])
-            Ca_dist = cmap['C_alpha']
-
-            A = np.double(Ca_dist < args.cmap_thresh)
-            S = seq2onehot(sequence)
-
-            S = S.reshape(1, *S.shape)
-            A = A.reshape(1, *A.shape)
-
-            # Results
-            proteins.append(protein)
-            Y_pred.append(model.predict([A, S]).reshape(1, output_dim))
-            Y_true.append(prot2annot[protein][args.ontology].reshape(1, output_dim))
-
-    pickle.dump(
-        {
-            'proteins': np.asarray(proteins),
-            'Y_pred': np.concatenate(Y_pred, axis=0),
-            'Y_true': np.concatenate(Y_true, axis=0),
-            'ontology': args.ontology,
-            'goterms': goterms,
-            'gonames': gonames,
-        },
-        open(f'{args.model_name}_results.pckl', 'wb')
-    )

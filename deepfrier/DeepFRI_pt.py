@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -93,15 +95,19 @@ class DeepFRI(nn.Module):
                 self.history['val_loss'].append(val_loss)
                 self.history['val_acc'].append(val_accuracy)
 
-            # Save model checkpoint
-            if self.model_name_prefix:
-                torch.save(self.state_dict(), f'{self.model_name_prefix}_epoch_{epoch}.pth')
+            self.save_model(f'epoch_{epoch}') # Save checkpoint
 
     def predict(self, input_cmap, input_seq):
         self.eval()
         with torch.no_grad():
             output = self(input_cmap, input_seq)
             return output.numpy()[0][:, 0]
+
+    def save_model(self, file_stem_suffix):
+        prefix = f'{self.model_name_prefix}_' if self.model_name_prefix else ''
+        file_path = f'checkpoints/{prefix}{file_stem_suffix}.pth'
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        torch.save(self.state_dict(), file_path)
 
     def plot_losses(self):
         plt.switch_backend('agg')
