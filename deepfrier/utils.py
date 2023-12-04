@@ -1,6 +1,5 @@
 import csv
 import numpy as np
-from sklearn.metrics import average_precision_score
 
 from Bio import SeqIO
 from Bio.PDB.PDBParser import PDBParser
