@@ -1,7 +1,4 @@
-import csv
 import json
-import os
-import pickle
 import argparse
 
 import h5py
