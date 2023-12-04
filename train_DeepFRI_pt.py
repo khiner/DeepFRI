@@ -22,11 +22,11 @@ def load_hdf5(filename, cmap_type, cmap_thresh, ont, channels):
         for i in range(num_records):
             L = hdf5_file['L'][i][0]
 
-            A = hdf5_file[f'{cmap_type}_dist_matrix'][i][:L*L]
+            A = hdf5_file[f'{cmap_type}_dist_matrix'][i]
             A = A.reshape(L, L)
             A_cmap = (A <= cmap_thresh).astype(np.float32)
 
-            S = hdf5_file['seq_1hot'][i][:L*channels]
+            S = hdf5_file['seq_1hot'][i]
             S = S.reshape(L, channels)
 
             labels = hdf5_file[f'{ont}_labels'][i]

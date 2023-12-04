@@ -33,14 +33,13 @@ def tfrecord_to_hdf5(tfrecord_filenames, output_filename, metadata, total_record
     with h5py.File(output_filename, 'w') as hdf5_file:
         # Create datasets based on metadata
         datasets = {}
-        for key, (dtype, max_len) in metadata.items():
+        for key, (dtype, _) in metadata.items():
             if dtype == 'string':
                 dt = h5py.special_dtype(vlen=str)
                 datasets[key] = hdf5_file.create_dataset(key, (total_records,), dtype=dt)
-            else:
-                shape = (total_records, max_len) if max_len is not None else (total_records,)
-                dtype_np = np.float32 if dtype == 'float_list' else np.int64
-                datasets[key] = hdf5_file.create_dataset(key, shape, dtype=dtype_np)
+            elif dtype in ['float_list', 'int64_list']:
+                dt = h5py.special_dtype(vlen=np.float32 if dtype == 'float_list' else np.int64)
+                datasets[key] = hdf5_file.create_dataset(key, (total_records,), dtype=dt)
 
         # Write data to HDF5 file
         index = 0
@@ -56,12 +55,13 @@ def tfrecord_to_hdf5(tfrecord_filenames, output_filename, metadata, total_record
                         dataset[index] = string_data
                     elif feature.HasField('float_list'):
                         data = np.array(feature.float_list.value, dtype=np.float32)
-                        dataset[index, :len(data)] = data
+                        dataset[index] = data
                     elif feature.HasField('int64_list'):
                         data = np.array(feature.int64_list.value, dtype=np.int64)
-                        dataset[index, :len(data)] = data
+                        dataset[index] = data
 
                 index += 1
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
