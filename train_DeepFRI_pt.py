@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
+from torchinfo import summary
 
 from deepfrier.DeepFRI_pt import DeepFRI
 from deepfrier.utils import seq2onehot
@@ -53,11 +54,7 @@ def pad_tensors(tensors):
 
 def pad_batch(batch):
     cmaps, seqs, labels = zip(*batch)
-    cmaps_padded = pad_tensors([cmap for cmap in cmaps])
-    seqs_padded = pad_sequence([seq for seq in seqs], batch_first=True, padding_value=0)
-    labels = torch.stack([label for label in labels])
-
-    return cmaps_padded, seqs_padded, labels
+    return pad_tensors(cmaps), pad_sequence(seqs, batch_first=True), torch.stack(labels)
 
 
 if __name__ == "__main__":
@@ -107,9 +104,10 @@ if __name__ == "__main__":
         device = torch.device('cpu')
     print(f'Using device: {device}')
 
-    print(f'### Training model: {args.model_name} on {output_dim} GO terms.')
     model = DeepFRI(output_dim=output_dim, n_channels=n_channels, gc_dims=args.gc_dims, fc_dims=args.fc_dims,
                     lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, model_name_prefix=args.model_name).to(device)
+    print(f'### Training model: {args.model_name} on {output_dim} GO terms.')
+    summary(model, device=device)
     model.train_model(device, train_loader, valid_loader, epochs=args.epochs)
     model.save_model('final')
     model.plot_losses()

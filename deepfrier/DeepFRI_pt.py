@@ -12,35 +12,49 @@ class DeepFRI(nn.Module):
     def __init__(self, output_dim, n_channels, gc_dims=[64, 128], fc_dims=[512], lr=0.0002, drop=0.3, l2_reg=1e-4, model_name_prefix=None):
         super(DeepFRI, self).__init__()
         self.model_name_prefix = model_name_prefix
+        self.l2_reg = l2_reg
+
+        # Encoding layer
+        lm_dim = 1024
+        self.input_layer = nn.Sequential(
+            nn.Linear(n_channels, lm_dim, bias=False),
+            nn.ReLU()
+        )
 
         gcnn_layers = []
-        input_dim = n_channels
+        input_dim = lm_dim
         for gc_dim in gc_dims:
             gc_layer = GraphConv(input_dim, gc_dim, activation='relu')
             gcnn_layers.append(gc_layer)
             input_dim = gc_dim
         self.gcnn_layers = nn.ModuleList(gcnn_layers)
+        input_dim = sum(gc_dims) # The gcnn layers are concatenated
 
         self.sum_pooling = SumPooling(axis=1)
 
         fc_layers = []
-        for fc_dim in fc_dims:
+        for l, fc_dim in enumerate(fc_dims):
             fc_layers.append(nn.Linear(input_dim, fc_dim))
             fc_layers.append(nn.ReLU())
-            fc_layers.append(nn.Dropout(drop))
+            fc_layers.append(nn.Dropout((l + 1) * drop))
             input_dim = fc_dim
         self.fc_layers = nn.Sequential(*fc_layers)
 
         self.output_layer = FuncPredictor(input_dim, output_dim)
 
-        self.optimizer = optim.Adam(self.parameters(), lr=lr, betas=(0.95, 0.99), weight_decay=l2_reg)
+        self.optimizer = optim.Adam(self.parameters(), lr=lr, betas=(0.95, 0.99), weight_decay=self.l2_reg)
         self.criterion = nn.CrossEntropyLoss()
         self.history = {'loss': [], 'val_loss': [], 'acc': [], 'val_acc': []}
 
     def forward(self, input_cmap, input_seq):
-        x = input_seq
+        x = self.input_layer(input_seq)
+        gcnn_outputs = []
         for gc_layer in self.gcnn_layers:
             x = gc_layer([x, input_cmap])
+            gcnn_outputs.append(x)
+
+        # Concatenate along the feature dimension
+        x = torch.cat(gcnn_outputs, dim=2) if len(gcnn_outputs) > 1 else gcnn_outputs[0]
         x = self.sum_pooling(x)
         x = self.fc_layers(x)
         out = self.output_layer(x)
@@ -57,6 +71,9 @@ class DeepFRI(nn.Module):
                 self.optimizer.zero_grad()
                 outputs = self(input_cmap, input_seq)
                 loss = self.criterion(outputs, labels)
+                # Optional L2 regularization on only the GCNN layers
+                # for gcnn_layer in self.gcnn_layers:
+                    # loss += self.l2_reg * torch.norm(gcnn_layer.linear.weight, p=2)
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()

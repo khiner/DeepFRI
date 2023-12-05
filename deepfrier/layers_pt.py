@@ -13,18 +13,16 @@ class GraphConv(nn.Module):
         self.output_dim = output_dim
         self.activation = getattr(F, activation) if activation else None
 
-        # Initialize the weights
-        self.kernel = nn.Parameter(torch.Tensor(input_dim, self.output_dim))
-        self.reset_parameters()
+        self.linear = nn.Linear(input_dim, output_dim, bias=False)
 
     def forward(self, inputs):
         X, A = inputs
         A_normalized = self._normalize(A)
-        output = torch.bmm(A_normalized, X)
-        output = torch.matmul(output, self.kernel)
+        x = torch.bmm(A_normalized, X)
+        x = self.linear(x)
         if self.activation:
-            output = self.activation(output)
-        return output
+            x = self.activation(x)
+        return x
 
     def _normalize(self, A):
         batch_size, n = A.shape[0], A.shape[1]
@@ -34,8 +32,6 @@ class GraphConv(nn.Module):
         D_hat = torch.diag_embed(torch.sum(A_hat, dim=2).pow(-0.5)) # Compute the degree matrix
         return D_hat @ A_hat @ D_hat # Compute the normalized adjacency matrix
 
-    def reset_parameters(self):
-        nn.init.xavier_uniform_(self.kernel)
 
 class FuncPredictor(nn.Module):
     def __init__(self, input_dim, output_dim):

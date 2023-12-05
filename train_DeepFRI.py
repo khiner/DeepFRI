@@ -25,8 +25,8 @@ if __name__ == "__main__":
     parser.add_argument('--cmap_type', type=str, default='ca', choices=['ca', 'cb'], help="Contact maps type.")
     parser.add_argument('--cmap_thresh', type=float, default=10.0, help="Distance cutoff for thresholding contact maps.")
     parser.add_argument('--model_name', type=str, default='GCN-PDB_MF', help="Name of the GCN model.")
-    parser.add_argument('--train_tfrecord_fn', type=str, default="./preprocessing/data/downloaded/PDB-GO/PDB_GO_train", help="Train tfrecords.")
-    parser.add_argument('--valid_tfrecord_fn', type=str, default="./preprocessing/data/downloaded/PDB-GO/PDB_GO_valid", help="Valid tfrecords.")
+    parser.add_argument('--train_tfrecord_dir', type=str, default="./preprocessing/data/downloaded/PDB-GO-TRAIN", help="Train tfrecord directory.")
+    parser.add_argument('--valid_tfrecord_dir', type=str, default="./preprocessing/data/downloaded/PDB-GO-VALID", help="Valid tfrecord directory.")
     parser.add_argument('--annot_fn', type=str, default="./preprocessing/data/nrPDB-GO_2019.06.18_annot.tsv", help="File (*tsv) with GO term annotations.")
     parser.add_argument('--test_list', type=str, default="./preprocessing/data/nrPDB-GO_2019.06.18_test.csv", help="File with test PDB chains.")
 
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     print(f'### Training model: {args.model_name} on {output_dim} GO terms.')
     model = DeepFRI(output_dim=output_dim, n_channels=26, gc_dims=args.gc_dims, fc_dims=args.fc_dims,
                     lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, model_name_prefix=args.model_name)
-    model.train(f'{args.train_tfrecord_fn}*', f'{args.valid_tfrecord_fn}*', epochs=args.epochs, batch_size=args.batch_size, pad_len=args.pad_len,
+    model.train(f'{args.train_tfrecord_dir}/*.tfrecords', f'{args.valid_tfrecord_dir}/*.tfrecords', epochs=args.epochs, batch_size=args.batch_size, pad_len=args.pad_len,
                 cmap_type=args.cmap_type, cmap_thresh=args.cmap_thresh, ont=args.ontology)
     model.save_model()
     model.plot_losses()
