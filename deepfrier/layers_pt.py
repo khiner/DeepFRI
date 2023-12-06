@@ -24,13 +24,13 @@ class GraphConv(nn.Module):
             x = self.activation(x)
         return x
 
-    def _normalize(self, A):
+    def _normalize(self, A, eps=1e-6):
         batch_size, n = A.shape[0], A.shape[1]
         A_hat = A.clone()
         A_hat.diagonal(dim1=1, dim2=2).fill_(0) # Remove self-loops
         A_hat += torch.eye(n, device=A.device).unsqueeze(0).expand(batch_size, -1, -1) # Add self-loops
-        D_hat = torch.diag_embed(torch.sum(A_hat, dim=2).pow(-0.5)) # Compute the degree matrix
-        return D_hat @ A_hat @ D_hat # Compute the normalized adjacency matrix
+        D_hat = torch.diag_embed(1. / (eps + A_hat.sum(dim=2).sqrt()))
+        return torch.bmm(torch.bmm(D_hat, A_hat), D_hat) # Compute the normalized adjacency matrix
 
 
 class FuncPredictor(nn.Module):
