@@ -73,7 +73,7 @@ if __name__ == "__main__":
     parser.add_argument('-l2', '--l2_reg', type=float, default=1e-4, help="L2 regularization coefficient.")
     parser.add_argument('-lr', type=float, default=0.0002, help="Initial learning rate.")
     parser.add_argument('-e', '--epochs', type=int, default=200, help="Number of epochs to train.")
-    parser.add_argument('-bs', '--batch_size', type=int, default=64, help="Batch size.")
+    parser.add_argument('-bs', '--batch_size', type=int, default=16, help="Batch size.")
     parser.add_argument('-pd', '--pad_len', type=int, help="Pad length (max len of protein sequences in train set).")
     parser.add_argument('-ont', '--ontology', type=str, default='mf', choices=['mf', 'bp', 'cc', 'ec'], help="Ontology.")
     parser.add_argument('--cmap_type', type=str, default='ca', choices=['ca', 'cb'], help="Contact maps type.")

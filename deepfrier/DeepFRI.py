@@ -4,9 +4,57 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torchmetrics.classification import MultilabelF1Score, MultilabelAUROC
+from torch_geometric.nn import GATv2Conv, GATConv
+
 import matplotlib.pyplot as plt
 import torch.onnx
 from tqdm import tqdm
+
+class GAT(nn.Module):
+    def __init__(self, input_dim, output_dim, activation, num_heads=4, alpha=0.2, reduction='concat'):
+        super().__init__()
+        self.conv1 = GATv2Conv(input_dim, 1, 4)
+        # On the Pubmed dataset, use `heads` output heads in `conv2`.
+        self.conv2 = GATv2Conv(1 * num_heads, output_dim, heads=1,
+                             concat=False)
+        # self.output_dim = output_dim
+        # self.activation = getattr(F, activation) if activation else None
+        # self.num_heads = num_heads
+        # self.reduction = reduction
+
+        # self.linear = nn.Linear(input_dim, output_dim, bias=False)
+        # self.attn_self = nn.Linear(output_dim, 1, bias=False)
+        # self.attn_nb = nn.Linear(output_dim, 1, bias=False )
+        # self.softmax = nn.Softmax(dim=2)
+        self.leaky_relu = nn.LeakyReLU(alpha)
+        
+    def forward(self, inputs):
+        X, A = inputs
+        output = self.leaky_relu(self.conv1(X, A))
+        output = self.conv2(output, A)
+        return output
+        # print(X.shape)
+        # features = [self.linear(X) for _ in range(self.num_heads)]
+        # self_attn = [self.attn_self(features[i]) for i in range(self.num_heads)]
+        # nb_attn = [self.attn_nb(features[i]) for i in range(self.num_heads)]
+        # dense = [self.leaky_relu(self_attn[i] + nb_attn[i].permute(0, 2, 1)) for i in range(self.num_heads)]
+        # mask = -10e9 * (1.0 - A)
+        # dense = [dense[i] + mask for i in range(self.num_heads)]
+
+        # self.norm_attn = [self.softmax(dense[i]) for i in range(self.num_heads)]
+        # output = [torch.bmm(self.norm_attn[i], features[i]) for i in range(self.num_heads)]
+
+        # if self.reduction == 'concat':
+        #     output = torch.cat(output, dim=2)
+        # else:
+        #     output = torch.mean(output)
+
+        # if self.activation is not None:
+        #     output = self.activation(output)
+
+        # print(output.shape)
+        # return output
 
 class GraphConv(nn.Module):
     """
@@ -55,7 +103,7 @@ class DeepFRI(nn.Module):
         gcnn_layers = []
         input_dim = lm_dim
         for gc_dim in gc_dims:
-            gc_layer = GraphConv(input_dim, gc_dim, activation='relu')
+            gc_layer = GAT(input_dim, gc_dim, activation='relu')
             gcnn_layers.append(gc_layer)
             input_dim = gc_dim
         self.gcnn_layers = nn.ModuleList(gcnn_layers)
@@ -73,7 +121,8 @@ class DeepFRI(nn.Module):
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, betas=(0.95, 0.99), weight_decay=self.l2_reg)
         self.criterion = nn.BCEWithLogitsLoss()
-        self.history = {'loss': [], 'val_loss': [], 'acc': [], 'val_acc': []}
+        self.mlroc = MultilabelAUROC(num_labels=489, average='micro')
+        self.history = {'loss': [], 'val_loss': [], 'auroc':[], 'val_auroc':[], 'acc': [], 'val_acc': []}
 
     def forward(self, input_cmap, input_seq):
         x = self.input_layer(input_seq)
@@ -95,7 +144,8 @@ class DeepFRI(nn.Module):
 
         outputs = self(cmap, seq)
         loss = self.criterion(outputs, labels)
-        return outputs, labels, loss
+        auroc = self.mlroc(outputs, labels.long())
+        return outputs, labels, loss, auroc
 
     def calculate_accuracy(self, outputs, labels):
         predictions = (torch.sigmoid(outputs) >= 0.5).float()
@@ -109,40 +159,44 @@ class DeepFRI(nn.Module):
         else:
             self.eval()
 
-        total_loss, correct_predictions, total_predictions = 0.0, 0, 0
+        total_loss, total_auroc, correct_predictions, total_predictions = 0.0, 0.0, 0, 0
         progress_bar = tqdm(enumerate(loader), total=len(loader))
         for i, batch in progress_bar:
             if is_training:
                 self.optimizer.zero_grad()
 
-            outputs, labels, loss = self.process_batch(batch, device)
+            outputs, labels, loss, auroc = self.process_batch(batch, device)
 
             if is_training:
                 loss.backward()
                 self.optimizer.step()
 
             total_loss += loss.item()
+            total_auroc += auroc
             correct, total = self.calculate_accuracy(outputs, labels)
             correct_predictions += correct
             total_predictions += total
 
             accuracy = 100 * correct_predictions / total_predictions
-            progress_bar.set_description(f'Epoch [{epoch}/{total_epochs}]: Loss: {loss.item():.3f}, Acc: {accuracy:.3f}')
+            progress_bar.set_description(f'Epoch [{epoch}/{total_epochs}]: Loss: {loss.item():.3f}, Auroc: {auroc:.3f}, Acc: {accuracy:.3f}')
 
         avg_loss = total_loss / len(loader)
+        avg_auroc = total_auroc / len(loader)
         accuracy = 100 * correct_predictions / total_predictions
-        return avg_loss, accuracy
+        return avg_loss, avg_auroc, accuracy
 
     def fit(self, device, train_loader, valid_loader, epochs=100):
         for epoch in range(1, epochs + 1):
-            train_loss, train_accuracy = self.run_epoch(epoch, epochs, train_loader, device, is_training=True)
-            print(f'Epoch [{epoch}/{epochs}], Train Loss: {train_loss}, Accuracy: {train_accuracy}%')
+            train_loss, train_auroc, train_accuracy = self.run_epoch(epoch, epochs, train_loader, device, is_training=True)
+            print(f'Epoch [{epoch}/{epochs}], Train Loss: {train_loss}, Auroc: {train_auroc}, Accuracy: {train_accuracy}%')
             self.history['loss'].append(train_loss)
+            self.history['auroc'].append(train_auroc)
             self.history['acc'].append(train_accuracy)
 
-            val_loss, val_accuracy = self.run_epoch(epoch, epochs, valid_loader, device, is_training=False)
-            print(f'Validation - Epoch [{epoch}/{epochs}]: Loss: {val_loss}, Accuracy: {val_accuracy}%')
+            val_loss, val_auroc, val_accuracy = self.run_epoch(epoch, epochs, valid_loader, device, is_training=False)
+            print(f'Validation - Epoch [{epoch}/{epochs}]: Loss: {val_loss}, Auroc: {val_auroc}, Accuracy: {val_accuracy}%')
             self.history['val_loss'].append(val_loss)
+            self.history['val_auroc'].append(val_auroc)
             self.history['val_acc'].append(val_accuracy)
 
             self.save_model(f'epoch_{epoch}')  # Save checkpoint
