@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import matplotlib.pyplot as plt
 import torch.onnx
+from tqdm import tqdm
 
 class GraphConv(nn.Module):
     """
@@ -88,58 +89,63 @@ class DeepFRI(nn.Module):
         out = self.output_layer(x)
         return out
 
-    def train_model(self, device, train_loader, valid_loader, epochs=100):
-        for epoch in range(epochs):
+    def process_batch(self, batch, device):
+        cmap, seq, labels = batch
+        cmap, seq, labels = cmap.to(device), seq.to(device), labels.to(device)
+
+        outputs = self(cmap, seq)
+        loss = self.criterion(outputs, labels)
+        return outputs, labels, loss
+
+    def calculate_accuracy(self, outputs, labels):
+        predictions = (torch.sigmoid(outputs) >= 0.5).float()
+        correct_predictions = (predictions == labels).sum().item()
+        total_predictions = labels.numel()
+        return correct_predictions, total_predictions
+
+    def run_epoch(self, epoch, total_epochs, loader, device, is_training):
+        if is_training:
             self.train()
-            total_loss, correct_predictions, total_predictions = 0.0, 0, 0
-            for i, (cmap, seq, labels) in enumerate(train_loader):
-                cmap, seq, labels = cmap.to(device), seq.to(device), labels.to(device)
+        else:
+            self.eval()
+
+        total_loss, correct_predictions, total_predictions = 0.0, 0, 0
+        progress_bar = tqdm(enumerate(loader), total=len(loader))
+        for i, batch in progress_bar:
+            if is_training:
                 self.optimizer.zero_grad()
-                outputs = self(cmap, seq)
-                loss = self.criterion(outputs, labels)
-                # Optional L2 regularization on only the GCNN layers
-                # for gcnn_layer in self.gcnn_layers:
-                    # loss += self.l2_reg * torch.norm(gcnn_layer.linear.weight, p=2)
+
+            outputs, labels, loss = self.process_batch(batch, device)
+
+            if is_training:
                 loss.backward()
                 self.optimizer.step()
-                total_loss += loss.item()
 
-                # Caluclate multi-label prediction accuracy
-                predictions = (torch.sigmoid(outputs) >= 0.5).float() # Convert logits to binary predictions with a 0.5 threshold
-                correct_predictions += (predictions == labels).sum().item()
-                total_predictions += labels.shape[0] * labels.shape[1]
+            total_loss += loss.item()
+            correct, total = self.calculate_accuracy(outputs, labels)
+            correct_predictions += correct
+            total_predictions += total
 
-                accuracy = torch.mean((predictions == labels).float())
-                print(f'Epoch [{epoch + 1}/{epochs}], Batch [{i} / {len(train_loader)}], Loss: {loss.item()}, Acc: {accuracy}')
+            accuracy = 100 * correct_predictions / total_predictions
+            progress_bar.set_description(f'Epoch [{epoch}/{total_epochs}]: Loss: {loss.item():.3f}, Acc: {accuracy:.3f}')
 
-            loss = total_loss / len(train_loader)
-            accurary = 100 * correct_predictions / total_predictions
-            print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss}, Accuracy: {accurary}%')
-            self.history['loss'].append(loss)
-            self.history['acc'].append(accurary)
+        avg_loss = total_loss / len(loader)
+        accuracy = 100 * correct_predictions / total_predictions
+        return avg_loss, accuracy
 
-            # Validation
-            self.eval()
-            with torch.no_grad():
-                total_loss, correct_predictions, total_predictions = 0.0, 0, 0
-                for cmap, seq, labels in valid_loader:
-                    cmap, seq, labels = cmap.to(device), seq.to(device), labels.to(device)
+    def fit(self, device, train_loader, valid_loader, epochs=100):
+        for epoch in range(1, epochs + 1):
+            train_loss, train_accuracy = self.run_epoch(epoch, epochs, train_loader, device, is_training=True)
+            print(f'Epoch [{epoch}/{epochs}], Train Loss: {train_loss}, Accuracy: {train_accuracy}%')
+            self.history['loss'].append(train_loss)
+            self.history['acc'].append(train_accuracy)
 
-                    outputs = self(cmap, seq)
-                    loss = self.criterion(outputs, labels)
-                    total_loss += loss.item()
+            val_loss, val_accuracy = self.run_epoch(epoch, epochs, valid_loader, device, is_training=False)
+            print(f'Validation - Epoch [{epoch}/{epochs}]: Loss: {val_loss}, Accuracy: {val_accuracy}%')
+            self.history['val_loss'].append(val_loss)
+            self.history['val_acc'].append(val_accuracy)
 
-                    predictions = (torch.sigmoid(outputs) >= 0.5).float() # Convert logits to binary predictions with a 0.5 threshold
-                    correct_predictions += (predictions == labels).sum().item()
-                    total_predictions += labels.shape[0] * labels.shape[1]
-
-                val_loss = total_loss / len(valid_loader)
-                val_accuracy = 100 * correct_predictions / total_predictions
-                print(f'Validation - Epoch [{epoch + 1}/{epochs}]: Loss: {val_loss}, Accuracy: {val_accuracy}%')
-                self.history['val_loss'].append(val_loss)
-                self.history['val_acc'].append(val_accuracy)
-
-            self.save_model(f'epoch_{epoch}') # Save checkpoint
+            self.save_model(f'epoch_{epoch}')  # Save checkpoint
 
     def predict(self, input_cmap, input_seq):
         self.eval()

@@ -116,7 +116,7 @@ if __name__ == "__main__":
                     lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, model_name_prefix=args.model_name).to(device)
     print(f'### Training model: {args.model_name} on {output_dim} GO terms.')
     summary(model, device=device)
-    model.train_model(device, train_loader, valid_loader, epochs=args.epochs)
+    model.fit(device, train_loader, valid_loader, epochs=args.epochs)
     # model.save_onnx(train_loader)
     model.save_model('final')
     model.plot_losses()
