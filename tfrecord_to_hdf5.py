@@ -64,7 +64,6 @@ def tfrecord_to_hdf5(tfrecord_filenames, output_filename, metadata, total_record
 
 ##### TESTING #####
 
-# This is exactly how `HDF5Dataset::__getitem__` is implemented in `train_DeepFRI_pt.py`.
 def parse_hdf5_record(filename, i, cmap_type, cmap_thresh, ont, channels):
     with h5py.File(filename, 'r') as hdf5_file:
         L = hdf5_file['L'][i][0]

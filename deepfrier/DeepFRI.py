@@ -1,176 +1,137 @@
-import glob
-import tensorflow as tf
+import os
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+import torch.onnx
 
 from .layers import FuncPredictor, SumPooling, GraphConv
 
-import matplotlib.pyplot as plt
-plt.switch_backend('agg')
-
-def _parse_function_gcn(serialized, n_goterms, channels=26, cmap_type='ca', cmap_thresh=10.0, ont='mf'):
-    features = {
-        cmap_type + '_dist_matrix': tf.io.VarLenFeature(dtype=tf.float32),
-        "seq_1hot": tf.io.VarLenFeature(dtype=tf.float32),
-        ont + "_labels": tf.io.FixedLenFeature([n_goterms], dtype=tf.int64),
-        "L": tf.io.FixedLenFeature([1], dtype=tf.int64)
-    }
-
-    # Parse the serialized data so we get a dict with our data.
-    parsed_example = tf.io.parse_single_example(serialized=serialized, features=features)
-
-    # Get all data
-    L = parsed_example['L'][0]
-
-    A_shape = tf.stack([L, L])
-    A = parsed_example[cmap_type + '_dist_matrix']
-    A = tf.cast(A, tf.float32)
-    A = tf.sparse.to_dense(A)
-    A = tf.reshape(A, A_shape)
-
-    # threshold distances
-    A_cmap = tf.cast(tf.less_equal(A, cmap_thresh), tf.float32)
-
-    S_shape = tf.stack([L, channels])
-    S = parsed_example['seq_1hot']
-    S = tf.cast(S, tf.float32)
-    S = tf.sparse.to_dense(S)
-    S = tf.reshape(S, S_shape)
-
-    labels = parsed_example[ont + '_labels']
-    labels = tf.cast(labels, tf.float32)
-
-    inverse_labels = tf.cast(tf.equal(labels, 0), dtype=tf.float32)  # [batch, classes]
-    y = tf.stack([labels, inverse_labels], axis=-1)  # labels, inverse labels
-    y = tf.reshape(y, shape=[n_goterms, 2])  # [batch, classes, Pos-Neg].
-
-    return {'cmap': A_cmap, 'seq': S}, y
-
-
-def get_batched_dataset(filenames, batch_size=64, pad_len=1000, n_goterms=347, channels=26, cmap_type='ca', cmap_thresh=10.0, ont='mf'):
-    # settings to read from all the shards in parallel
-    AUTO = tf.data.experimental.AUTOTUNE
-    ignore_order = tf.data.Options()
-    ignore_order.experimental_deterministic = False
-
-    # list all files
-    filenames = tf.io.gfile.glob(filenames)
-    dataset = tf.data.TFRecordDataset(filenames, num_parallel_reads=AUTO)
-    dataset = dataset.with_options(ignore_order)
-
-    # Parse the serialized data in the TFRecords files.
-    dataset = dataset.map(lambda x: _parse_function_gcn(x, n_goterms=n_goterms, channels=channels, cmap_type=cmap_type, cmap_thresh=cmap_thresh, ont=ont))
-
-    # Randomizes input using a window of 2000 elements (read into memory)
-    dataset = dataset.shuffle(buffer_size=2000 + 3*batch_size)
-    dataset = dataset.padded_batch(batch_size, padded_shapes=({'cmap': [pad_len, pad_len], 'seq': [pad_len, channels]}, [None, 2]))
-    dataset = dataset.repeat()
-
-    return dataset
-
-
-class DeepFRI(object):
-    """ Class containig the GCN for predicting protein function. """
-    def __init__(self, output_dim, n_channels=26, gc_dims=[64, 128], fc_dims=[512], lr=0.0002, drop=0.3, l2_reg=1e-4, model_name_prefix=None):
-        """ Initialize the model
-        :param output_dim: {int} number of GO terms/EC numbers
-        :param n_channels: {int} number of input features per residue (26 for 1-hot encoding)
-        :param gc_dims: {list <int>} number of hidden units in GConv layers
-        :param fc_dims: {list <int>} number of hiddne units in Dense layers
-        :param lr: {float} learning rate for Adam optimizer
-        :param drop: {float} dropout fraction for Dense layers
-        :model_name_prefix: {string} name of a deepFRI model to be saved
-        """
-        self.output_dim = output_dim
-        self.n_channels = n_channels
+class DeepFRI(nn.Module):
+    """ Class containing the GCN for predicting protein function. """
+    def __init__(self, output_dim, n_channels, gc_dims=[64, 128], fc_dims=[512], lr=0.0002, drop=0.3, l2_reg=1e-4, model_name_prefix=None):
+        super(DeepFRI, self).__init__()
         self.model_name_prefix = model_name_prefix
+        self.l2_reg = l2_reg
 
-        # Build and compile model
-        self.gc_layer = 'GraphConv' # Simplifying to use only one type of GC layer for now.
-        print ("### Compiling DeepFRI model with %s layer..." % (self.gc_layer))
-
-        input_cmap = tf.keras.layers.Input(shape=(None, None), name='cmap')
-        input_seq = tf.keras.layers.Input(shape=(None, n_channels), name='seq')
-
-        # Encoding layers
+        # Encoding layer
         lm_dim = 1024
-        x_aa = tf.keras.layers.Dense(lm_dim, use_bias=False, name='AA_embedding')(input_seq)
-        x = tf.keras.layers.Activation('relu')(x_aa)
+        self.input_layer = nn.Sequential(
+            nn.Linear(n_channels, lm_dim, bias=False),
+            nn.ReLU()
+        )
 
-        # Graph convolution layers
         gcnn_layers = []
-        for l in range(len(gc_dims)):
-            x = GraphConv(
-                gc_dims[l], activation='elu',
-                kernel_regularizer=tf.keras.regularizers.l2(l2_reg),
-                name=f'{self.gc_layer}_{l+1}'
-            )([x, input_cmap])
-            gcnn_layers.append(x)
+        input_dim = lm_dim
+        for gc_dim in gc_dims:
+            gc_layer = GraphConv(input_dim, gc_dim, activation='relu')
+            gcnn_layers.append(gc_layer)
+            input_dim = gc_dim
+        self.gcnn_layers = nn.ModuleList(gcnn_layers)
+        input_dim = sum(gc_dims) # The gcnn layers are concatenated
 
-        x = tf.keras.layers.Concatenate(name='GCNN_concatenate')(gcnn_layers) if len(gcnn_layers) > 1 else gcnn_layers[-1]
-        x = SumPooling(axis=1, name='SumPooling')(x)
+        self.sum_pooling = SumPooling(axis=1)
 
-        # Dense layers
-        for l in range(len(fc_dims)):
-            x = tf.keras.layers.Dense(units=fc_dims[l], activation='relu')(x)
-            x = tf.keras.layers.Dropout((l + 1)*drop)(x)
+        fc_layers = []
+        for l, fc_dim in enumerate(fc_dims):
+            fc_layers.append(nn.Linear(input_dim, fc_dim))
+            fc_layers.append(nn.ReLU())
+            fc_layers.append(nn.Dropout((l + 1) * drop))
+            input_dim = fc_dim
+        self.fc_layers = nn.Sequential(*fc_layers)
 
-        output_layer = FuncPredictor(output_dim=output_dim, name='labels')(x)
+        self.output_layer = FuncPredictor(input_dim, output_dim)
 
-        self.model = tf.keras.Model(inputs=[input_cmap, input_seq], outputs=output_layer)
-        optimizer = tf.keras.optimizers.Adam(learning_rate=lr, beta_1=0.95, beta_2=0.99)
-        pred_loss = tf.keras.losses.CategoricalCrossentropy()
-        self.model.compile(optimizer=optimizer, loss=pred_loss, metrics=['acc'])
-        print (self.model.summary())
+        self.optimizer = optim.Adam(self.parameters(), lr=lr, betas=(0.95, 0.99), weight_decay=self.l2_reg)
+        self.criterion = nn.BCEWithLogitsLoss()
+        self.history = {'loss': [], 'val_loss': [], 'acc': [], 'val_acc': []}
 
-    def train(self, train_tfrecord_fn, valid_tfrecord_fn,
-              epochs=100, batch_size=64, pad_len=1200, cmap_type='ca', cmap_thresh=10.0, ont='mf'):
+    def forward(self, input_cmap, input_seq):
+        x = self.input_layer(input_seq)
+        gcnn_outputs = []
+        for gc_layer in self.gcnn_layers:
+            x = gc_layer([x, input_cmap])
+            gcnn_outputs.append(x)
 
-        n_train_records = sum(1 for f in glob.glob(train_tfrecord_fn) for _ in tf.data.TFRecordDataset(f))
-        n_valid_records = sum(1 for f in glob.glob(valid_tfrecord_fn) for _ in tf.data.TFRecordDataset(f))
-        print ("### Training on: ", n_train_records, "contact maps.")
-        print ("### Validating on: ", n_valid_records, "contact maps.")
+        # Concatenate along the feature dimension
+        x = torch.cat(gcnn_outputs, dim=2) if len(gcnn_outputs) > 1 else gcnn_outputs[0]
+        x = self.sum_pooling(x)
+        x = self.fc_layers(x)
+        out = self.output_layer(x)
+        return out
 
-        # train tfrecords
-        batch_train = get_batched_dataset(train_tfrecord_fn,
-                                          batch_size=batch_size,
-                                          pad_len=pad_len,
-                                          n_goterms=self.output_dim,
-                                          channels=self.n_channels,
-                                          cmap_type=cmap_type,
-                                          cmap_thresh=cmap_thresh,
-                                          ont=ont)
+    def train_model(self, device, train_loader, valid_loader, epochs=100):
+        for epoch in range(epochs):
+            self.train()
+            total_loss, correct_predictions, total_predictions = 0.0, 0, 0
+            for i, (cmap, seq, labels) in enumerate(train_loader):
+                cmap, seq, labels = cmap.to(device), seq.to(device), labels.to(device)
+                self.optimizer.zero_grad()
+                outputs = self(cmap, seq)
+                loss = self.criterion(outputs, labels)
+                # Optional L2 regularization on only the GCNN layers
+                # for gcnn_layer in self.gcnn_layers:
+                    # loss += self.l2_reg * torch.norm(gcnn_layer.linear.weight, p=2)
+                loss.backward()
+                self.optimizer.step()
+                total_loss += loss.item()
 
-        # validation tfrecords
-        batch_valid = get_batched_dataset(valid_tfrecord_fn,
-                                          batch_size=batch_size,
-                                          pad_len=pad_len,
-                                          n_goterms=self.output_dim,
-                                          channels=self.n_channels,
-                                          cmap_type=cmap_type,
-                                          cmap_thresh=cmap_thresh,
-                                          ont=ont)
+                # Caluclate multi-label prediction accuracy
+                predictions = (torch.sigmoid(outputs) >= 0.5).float() # Convert logits to binary predictions with a 0.5 threshold
+                correct_predictions += (predictions == labels).sum().item()
+                total_predictions += labels.shape[0] * labels.shape[1]
 
-        # early stopping
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=5)
+                accuracy = torch.mean((predictions == labels).float())
+                print(f'Epoch [{epoch + 1}/{epochs}], Batch [{i} / {len(train_loader)}], Loss: {loss.item()}, Acc: {accuracy}')
 
-        # model checkpoint
-        mc = tf.keras.callbacks.ModelCheckpoint(self.model_name_prefix + '_best_train_model.h5', monitor='val_loss', mode='min', verbose=1,
-                                                save_best_only=True, save_weights_only=True)
+            loss = total_loss / len(train_loader)
+            accurary = 100 * correct_predictions / total_predictions
+            print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss}, Accuracy: {accurary}%')
+            self.history['loss'].append(loss)
+            self.history['acc'].append(accurary)
 
-        # fit model
-        history = self.model.fit(
-            batch_train,
-            epochs=epochs,
-            validation_data=batch_valid,
-            steps_per_epoch=n_train_records//batch_size,
-            validation_steps=n_valid_records//batch_size,
-            callbacks=[es, mc])
+            # Validation
+            self.eval()
+            with torch.no_grad():
+                total_loss, correct_predictions, total_predictions = 0.0, 0, 0
+                for cmap, seq, labels in valid_loader:
+                    cmap, seq, labels = cmap.to(device), seq.to(device), labels.to(device)
 
-        self.history = history.history
+                    outputs = self(cmap, seq)
+                    loss = self.criterion(outputs, labels)
+                    total_loss += loss.item()
 
-    def predict(self, input_data):
-        return self.model(input_data).numpy()[0][:, 0]
+                    predictions = (torch.sigmoid(outputs) >= 0.5).float() # Convert logits to binary predictions with a 0.5 threshold
+                    correct_predictions += (predictions == labels).sum().item()
+                    total_predictions += labels.shape[0] * labels.shape[1]
+
+                val_loss = total_loss / len(valid_loader)
+                val_accuracy = 100 * correct_predictions / total_predictions
+                print(f'Validation - Epoch [{epoch + 1}/{epochs}]: Loss: {val_loss}, Accuracy: {val_accuracy}%')
+                self.history['val_loss'].append(val_loss)
+                self.history['val_acc'].append(val_accuracy)
+
+            self.save_model(f'epoch_{epoch}') # Save checkpoint
+
+    def predict(self, input_cmap, input_seq):
+        self.eval()
+        with torch.no_grad():
+            output = self(input_cmap, input_seq)
+            return output.numpy()[0][:, 0]
+
+    def save_onnx(self, train_loader):
+        input_cmap, input_seq, _ = next(iter(train_loader))
+        torch.onnx.export(self, (input_cmap, input_seq), './model.onnx', opset_version=11)
+
+    def save_model(self, file_stem_suffix):
+        prefix = f'{self.model_name_prefix}_' if self.model_name_prefix else ''
+        file_path = f'checkpoints/{prefix}{file_stem_suffix}.pth'
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        torch.save(self.state_dict(), file_path)
 
     def plot_losses(self):
+        plt.switch_backend('agg')
         plt.figure()
         plt.plot(self.history['loss'], '-')
         plt.plot(self.history['val_loss'], '-')
@@ -178,7 +139,7 @@ class DeepFRI(object):
         plt.ylabel('loss')
         plt.xlabel('epoch')
         plt.legend(['train', 'validation'], loc='upper left')
-        plt.savefig(self.model_name_prefix + '_model_loss.png', bbox_inches='tight')
+        plt.savefig(f'{self.model_name_prefix}_model_loss.png', bbox_inches='tight')
 
         plt.figure()
         plt.plot(self.history['acc'], '-')
@@ -187,14 +148,4 @@ class DeepFRI(object):
         plt.ylabel('accuracy')
         plt.xlabel('epoch')
         plt.legend(['train', 'validation'], loc='upper left')
-        plt.savefig(self.model_name_prefix + '_model_accuracy.png', bbox_inches='tight')
-
-    def save_model(self):
-        self.model.save(self.model_name_prefix + '.hdf5')
-
-    def load_model(self):
-        self.model = tf.keras.models.load_model(self.model_name_prefix + '.hdf5',
-                                                custom_objects={self.gc_layer: GraphConv,
-                                                                'FuncPredictor': FuncPredictor,
-                                                                'SumPooling': SumPooling
-                                                                })
+        plt.savefig(f'{self.model_name_prefix}_model_accuracy.png', bbox_inches='tight')
