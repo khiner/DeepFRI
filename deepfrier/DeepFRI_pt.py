@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import torch.onnx
 
 from .layers_pt import FuncPredictor, SumPooling, GraphConv
 
@@ -119,6 +120,10 @@ class DeepFRI(nn.Module):
         with torch.no_grad():
             output = self(input_cmap, input_seq)
             return output.numpy()[0][:, 0]
+
+    def save_onnx(self, train_loader):
+        input_cmap, input_seq, _ = next(iter(train_loader))
+        torch.onnx.export(self, (input_cmap, input_seq), './model.onnx', opset_version=11)
 
     def save_model(self, file_stem_suffix):
         prefix = f'{self.model_name_prefix}_' if self.model_name_prefix else ''

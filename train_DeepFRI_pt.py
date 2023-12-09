@@ -109,6 +109,7 @@ if __name__ == "__main__":
     print(f'### Training model: {args.model_name} on {output_dim} GO terms.')
     summary(model, device=device)
     model.train_model(device, train_loader, valid_loader, epochs=args.epochs)
+    # model.save_onnx(train_loader)
     model.save_model('final')
     model.plot_losses()
 
