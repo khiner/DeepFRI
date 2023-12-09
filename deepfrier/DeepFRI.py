@@ -2,14 +2,43 @@ import os
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import matplotlib.pyplot as plt
 import torch.onnx
 
-from .layers import FuncPredictor, SumPooling, GraphConv
+class GraphConv(nn.Module):
+    """
+    Graph Convolution Layer according to (T. Kipf and M. Welling, ICLR 2017)
+    """
+
+    def __init__(self, input_dim, output_dim, activation):
+        super(GraphConv, self).__init__()
+
+        self.output_dim = output_dim
+        self.activation = getattr(F, activation) if activation else None
+
+        self.linear = nn.Linear(input_dim, output_dim, bias=False)
+
+    def forward(self, inputs):
+        X, A = inputs
+        A_normalized = self._normalize(A)
+        x = torch.bmm(A_normalized, X)
+        x = self.linear(x)
+        if self.activation:
+            x = self.activation(x)
+        return x
+
+    def _normalize(self, A, eps=1e-6):
+        batch_size, n = A.shape[0], A.shape[1]
+        A_hat = A.clone()
+        A_hat.diagonal(dim1=1, dim2=2).fill_(0) # Remove self-loops
+        A_hat += torch.eye(n, device=A.device).unsqueeze(0).expand(batch_size, -1, -1) # Add self-loops
+        D_hat = torch.diag_embed(1. / (eps + A_hat.sum(dim=2).sqrt()))
+        return torch.bmm(torch.bmm(D_hat, A_hat), D_hat) # Compute the normalized adjacency matrix
 
 class DeepFRI(nn.Module):
-    """ Class containing the GCN for predicting protein function. """
+    """GCN model for predicting protein function."""
     def __init__(self, output_dim, n_channels, gc_dims=[64, 128], fc_dims=[512], lr=0.0002, drop=0.3, l2_reg=1e-4, model_name_prefix=None):
         super(DeepFRI, self).__init__()
         self.model_name_prefix = model_name_prefix
@@ -29,9 +58,7 @@ class DeepFRI(nn.Module):
             gcnn_layers.append(gc_layer)
             input_dim = gc_dim
         self.gcnn_layers = nn.ModuleList(gcnn_layers)
-        input_dim = sum(gc_dims) # The gcnn layers are concatenated
-
-        self.sum_pooling = SumPooling(axis=1)
+        input_dim = sum(gc_dims) # GCNN layers are concatenated
 
         fc_layers = []
         for l, fc_dim in enumerate(fc_dims):
@@ -41,7 +68,7 @@ class DeepFRI(nn.Module):
             input_dim = fc_dim
         self.fc_layers = nn.Sequential(*fc_layers)
 
-        self.output_layer = FuncPredictor(input_dim, output_dim)
+        self.output_layer = nn.Linear(input_dim, output_dim) # PyTorch's BCEWithLogitsLoss expects logits
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, betas=(0.95, 0.99), weight_decay=self.l2_reg)
         self.criterion = nn.BCEWithLogitsLoss()
@@ -56,7 +83,7 @@ class DeepFRI(nn.Module):
 
         # Concatenate along the feature dimension
         x = torch.cat(gcnn_outputs, dim=2) if len(gcnn_outputs) > 1 else gcnn_outputs[0]
-        x = self.sum_pooling(x)
+        x = x.sum(dim=1)
         x = self.fc_layers(x)
         out = self.output_layer(x)
         return out
