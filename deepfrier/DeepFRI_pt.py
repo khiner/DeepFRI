@@ -44,7 +44,7 @@ class DeepFRI(nn.Module):
         self.output_layer = FuncPredictor(input_dim, output_dim)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, betas=(0.95, 0.99), weight_decay=self.l2_reg)
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.BCEWithLogitsLoss()
         self.history = {'loss': [], 'val_loss': [], 'acc': [], 'val_acc': []}
 
     def forward(self, input_cmap, input_seq):
@@ -65,12 +65,10 @@ class DeepFRI(nn.Module):
         for epoch in range(epochs):
             self.train()
             total_loss, correct_predictions, total_predictions = 0.0, 0, 0
-            for i, (input_cmap, input_seq, labels) in enumerate(train_loader):
-                input_cmap, input_seq, labels = input_cmap.to(device), input_seq.to(device), labels.to(device)
-                labels = torch.max(labels, 1)[1]  # Convert one-hot to class indices
-
+            for i, (cmap, seq, labels) in enumerate(train_loader):
+                cmap, seq, labels = cmap.to(device), seq.to(device), labels.to(device)
                 self.optimizer.zero_grad()
-                outputs = self(input_cmap, input_seq)
+                outputs = self(cmap, seq)
                 loss = self.criterion(outputs, labels)
                 # Optional L2 regularization on only the GCNN layers
                 # for gcnn_layer in self.gcnn_layers:
@@ -79,11 +77,13 @@ class DeepFRI(nn.Module):
                 self.optimizer.step()
                 total_loss += loss.item()
 
-                _, predicted = torch.max(outputs, 1)  # Predicted class indices
-                correct_predictions += (predicted == labels).sum().item()
-                total_predictions += labels.size(0)
+                # Caluclate multi-label prediction accuracy
+                predictions = (torch.sigmoid(outputs) >= 0.5).float() # Convert logits to binary predictions with a 0.5 threshold
+                correct_predictions += (predictions == labels).sum().item()
+                total_predictions += labels.shape[0] * labels.shape[1]
 
-                print(f'Epoch [{epoch + 1}/{epochs}], Batch [{i} / {len(train_loader)}], Loss: {loss.item()}')
+                accuracy = torch.mean((predictions == labels).float())
+                print(f'Epoch [{epoch + 1}/{epochs}], Batch [{i} / {len(train_loader)}], Loss: {loss.item()}, Acc: {accuracy}')
 
             loss = total_loss / len(train_loader)
             accurary = 100 * correct_predictions / total_predictions
@@ -95,17 +95,16 @@ class DeepFRI(nn.Module):
             self.eval()
             with torch.no_grad():
                 total_loss, correct_predictions, total_predictions = 0.0, 0, 0
-                for input_cmap, input_seq, labels in valid_loader:
-                    input_cmap, input_seq, labels = input_cmap.to(device), input_seq.to(device), labels.to(device)
-                    labels = torch.max(labels, 1)[1] # Convert one-hot to class indices
+                for cmap, seq, labels in valid_loader:
+                    cmap, seq, labels = cmap.to(device), seq.to(device), labels.to(device)
 
-                    outputs = self(input_cmap, input_seq)
+                    outputs = self(cmap, seq)
                     loss = self.criterion(outputs, labels)
                     total_loss += loss.item()
 
-                    _, predicted = torch.max(outputs, 1) # Predicted class indices
-                    correct_predictions += (predicted == labels).sum().item()
-                    total_predictions += labels.size(0)
+                    predictions = (torch.sigmoid(outputs) >= 0.5).float() # Convert logits to binary predictions with a 0.5 threshold
+                    correct_predictions += (predictions == labels).sum().item()
+                    total_predictions += labels.shape[0] * labels.shape[1]
 
                 val_loss = total_loss / len(valid_loader)
                 val_accuracy = 100 * correct_predictions / total_predictions

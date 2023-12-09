@@ -38,12 +38,11 @@ class FuncPredictor(nn.Module):
         super(FuncPredictor, self).__init__()
 
         self.output_dim = output_dim
-        self.output_layer = nn.Linear(input_dim, 2 * output_dim)
+        self.output_layer = nn.Linear(input_dim, output_dim)
 
     def forward(self, x):
         x = self.output_layer(x)
-        x = x.view(-1, self.output_dim, 2)
-        return x # PyTorch's CrossEntropyLoss expects logits
+        return x # PyTorch's BCEWithLogitsLoss expects logits
 
 class SumPooling(nn.Module):
     def __init__(self, axis):

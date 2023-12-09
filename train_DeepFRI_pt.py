@@ -33,9 +33,7 @@ class HDF5Dataset(Dataset):
             S = hdf5_file['seq_1hot'][i]
             S = S.reshape(L, self.channels)
 
-            labels = hdf5_file[f'{self.ont}_labels'][i]
-            inverse_labels = (labels == 0).astype(np.float32)
-            y = np.stack([labels, inverse_labels], axis=-1)
+            y = hdf5_file[f'{self.ont}_labels'][i]
 
             return torch.tensor(A_cmap, dtype=torch.float32), torch.tensor(S, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
