@@ -101,8 +101,8 @@ if __name__ == "__main__":
     train_dataset = HDF5Dataset(args.train_hdf5_file, cmap_type, cmap_thresh, ont, n_channels)
     valid_dataset = HDF5Dataset(args.valid_hdf5_file, cmap_type, cmap_thresh, ont, n_channels)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=pad_batch, num_workers=4)
-    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=pad_batch, num_workers=4, pin_memory=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, collate_fn=pad_batch, num_workers=4, pin_memory=True)
 
     if torch.backends.mps.is_available():
         device = torch.device('mps')
