@@ -18,26 +18,37 @@ class HDF5Dataset(Dataset):
         self.cmap_thresh = cmap_thresh
         self.ont = ont
         self.channels = channels
+        self.hdf5_file = None
         with h5py.File(self.filename, 'r') as hdf5_file:
             self.num_records = hdf5_file['L'].shape[0]
 
     def __getitem__(self, i):
-        with h5py.File(self.filename, 'r') as hdf5_file:
-            L = hdf5_file['L'][i][0]
+        # Open the file if it is not already open
+        if self.hdf5_file is None:
+            self.hdf5_file = h5py.File(self.filename, 'r')
 
-            A = hdf5_file[f'{self.cmap_type}_dist_matrix'][i]
-            A = A.reshape(L, L)
-            A_cmap = (A <= self.cmap_thresh).astype(np.float32)
+        L = self.hdf5_file['L'][i][0]
 
-            S = hdf5_file['seq_1hot'][i]
-            S = S.reshape(L, self.channels)
+        A = self.hdf5_file[f'{self.cmap_type}_dist_matrix'][i]
+        A = A.reshape(L, L)
+        A_cmap = (A <= self.cmap_thresh).astype(np.float32)
 
-            y = hdf5_file[f'{self.ont}_labels'][i]
+        S = self.hdf5_file['seq_1hot'][i]
+        S = S.reshape(L, self.channels)
 
-            return torch.tensor(A_cmap, dtype=torch.float32), torch.tensor(S, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
+        y = self.hdf5_file[f'{self.ont}_labels'][i]
+
+        return torch.tensor(A_cmap, dtype=torch.float32), torch.tensor(S, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
     def __len__(self):
         return self.num_records
+
+    def close(self):
+        if self.hdf5_file is not None:
+            self.hdf5_file.close()
+
+    def __del__(self):
+        self.close()
 
 def pad_tensors(tensors):
     """Pad a list of tensors to the same size in the first two dimensions. """
