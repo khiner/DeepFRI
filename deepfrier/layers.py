@@ -1,4 +1,7 @@
 import tensorflow as tf
+import sys
+import os
+
 
 class GraphConv(tf.keras.layers.Layer):
     """
@@ -18,7 +21,8 @@ class GraphConv(tf.keras.layers.Layer):
 
         self.kernel = self.add_weight(
             shape=kernel_shape,
-            initializer='glorot_uniform',
+            # initializer='glorot_uniform',
+            initializer='ones',
             name='kernel',
             regularizer=self.kernel_regularizer,
             trainable=True)
@@ -31,10 +35,19 @@ class GraphConv(tf.keras.layers.Layer):
         return tf.matmul(tf.matmul(D_hat, A_hat), D_hat)
 
     def call(self, inputs):
-        output = tf.keras.backend.batch_dot(self._normalize(inputs[1]), inputs[0])
+        print("\n\n")
+        # tf.print(inputs[0][0])
+        # tf.print(inputs[0].shape)
+        temp = self._normalize(inputs[1])
+        # print("Normalization:\n")
+        # tf.print(temp[0])
+        output = tf.keras.backend.batch_dot(temp, inputs[0])
+        # tf.print(output[0])
         output = tf.keras.backend.dot(output, self.kernel)
         if self.activation is not None:
             output = self.activation(output)
+        # print("After GCNNLayer")
+        # tf.print(output[0])
         return output
 
     def get_config(self):
@@ -51,13 +64,17 @@ class FuncPredictor(tf.keras.layers.Layer):
         super(FuncPredictor, self).__init__(**kwargs)
 
         self.output_dim = output_dim
-        self.output_layer = tf.keras.layers.Dense(2*output_dim)
+        self.output_layer = tf.keras.layers.Dense(2*output_dim, kernel_initializer='ones')
         self.reshape = tf.keras.layers.Reshape(target_shape=(output_dim, 2))
         self.softmax = tf.keras.layers.Softmax(axis=-1, name='labels')
 
     def call(self, x):
+        # print("Before FuncPredictor:\n")
+        tf.print(x[0])
         x = self.output_layer(x)
         x = self.reshape(x)
+        # print("After FuncPredictor:\n")
+        tf.print(x[0])
         out = self.softmax(x)
         return out
 
@@ -75,6 +92,10 @@ class SumPooling(tf.keras.layers.Layer):
         self.axis = axis
 
     def call(self, x):
+        # tf.print(x[0])
+        temp = tf.reduce_sum(x, axis=self.axis)
+        # print("After Pooling:\n")
+        tf.print(temp[0])
         return tf.reduce_sum(x, axis=self.axis)
 
     def get_config(self):

@@ -43,7 +43,7 @@ if __name__ == "__main__":
     print(f'### Training model: {args.model_name} on {output_dim} GO terms.')
     model = DeepFRI(output_dim=output_dim, n_channels=26, gc_dims=args.gc_dims, fc_dims=args.fc_dims,
                     lr=args.lr, drop=args.dropout, l2_reg=args.l2_reg, model_name_prefix=args.model_name)
-    model.train(f'{args.train_tfrecord_dir}/*.tfrecords', f'{args.valid_tfrecord_dir}/*.tfrecords', epochs=args.epochs, batch_size=args.batch_size, pad_len=args.pad_len,
+    model.train(f'{args.train_tfrecord_dir}*.tfrecords', f'{args.valid_tfrecord_dir}*.tfrecords', epochs=1, batch_size=1, pad_len=args.pad_len,
                 cmap_type=args.cmap_type, cmap_thresh=args.cmap_thresh, ont=args.ontology)
     model.save_model()
     model.plot_losses()

@@ -4,10 +4,10 @@
 # cuda libraries to run tf2 on gpu
 # module load slurm gcc cuda/10.1.105_418.39 cudnn/v7.6.2-cuda-10.1
 
-graph_conv_dims="512 512 512"
+graph_conv_dims="512"
 fully_connected_dims="1024"
 graph_conv_layer=GraphConv
-ontology=ec
+ontology=mf
 cmap_thresh=10.0
 data_dir=./preprocessing/data/TFRecords/
 cmap_data=PDB # possible: PDB, SWISS-MODEL or MERGED
@@ -37,8 +37,8 @@ python train_DeepFRI.py \
     -ont ${ontology} \
     --cmap_type ca \
     --cmap_thresh ${cmap_thresh} \
-    --train_tfrecord_fn ${data_dir}${cmap_data}_${annot}_train \
-    --valid_tfrecord_fn ${data_dir}${cmap_data}_${annot}_valid \
+    --train_tfrecord_dir ${data_dir}${cmap_data}_${annot}_train/ \
+    --valid_tfrecord_dir ${data_dir}${cmap_data}_${annot}_valid/ \
     --annot_fn ${annot_fn} \
     --test_list ${test_list} \
     --model_name ${model_name} \

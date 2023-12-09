@@ -1,5 +1,6 @@
 import glob
 import tensorflow as tf
+import numpy as np
 
 from .layers import FuncPredictor, SumPooling, GraphConv
 
@@ -69,7 +70,7 @@ def get_batched_dataset(filenames, batch_size=64, pad_len=1000, n_goterms=347, c
 
 class DeepFRI(object):
     """ Class containig the GCN for predicting protein function. """
-    def __init__(self, output_dim, n_channels=26, gc_dims=[64, 128], fc_dims=[512], lr=0.0002, drop=0.3, l2_reg=1e-4, model_name_prefix=None):
+    def __init__(self, output_dim, n_channels=26, gc_dims=[64, 128], fc_dims=[512], lr=0.0002, drop=0.3, l2_reg=1e-4, model_name_prefix=None, outputs=None):
         """ Initialize the model
         :param output_dim: {int} number of GO terms/EC numbers
         :param n_channels: {int} number of input features per residue (26 for 1-hot encoding)
@@ -82,6 +83,7 @@ class DeepFRI(object):
         self.output_dim = output_dim
         self.n_channels = n_channels
         self.model_name_prefix = model_name_prefix
+        self.outputs = outputs
 
         # Build and compile model
         self.gc_layer = 'GraphConv' # Simplifying to use only one type of GC layer for now.
@@ -89,10 +91,12 @@ class DeepFRI(object):
 
         input_cmap = tf.keras.layers.Input(shape=(None, None), name='cmap')
         input_seq = tf.keras.layers.Input(shape=(None, n_channels), name='seq')
+        self.input_cmap = input_cmap
+        self.input_seq = input_seq
 
         # Encoding layers
         lm_dim = 1024
-        x_aa = tf.keras.layers.Dense(lm_dim, use_bias=False, name='AA_embedding')(input_seq)
+        x_aa = tf.keras.layers.Dense(lm_dim, use_bias=False, kernel_initializer='ones', name='AA_embedding')(input_seq)
         x = tf.keras.layers.Activation('relu')(x_aa)
 
         # Graph convolution layers
@@ -110,7 +114,7 @@ class DeepFRI(object):
 
         # Dense layers
         for l in range(len(fc_dims)):
-            x = tf.keras.layers.Dense(units=fc_dims[l], activation='relu')(x)
+            x = tf.keras.layers.Dense(units=fc_dims[l], kernel_initializer='ones', activation='relu')(x)
             x = tf.keras.layers.Dropout((l + 1)*drop)(x)
 
         output_layer = FuncPredictor(output_dim=output_dim, name='labels')(x)
@@ -130,24 +134,45 @@ class DeepFRI(object):
         print ("### Validating on: ", n_valid_records, "contact maps.")
 
         # train tfrecords
-        batch_train = get_batched_dataset(train_tfrecord_fn,
-                                          batch_size=batch_size,
-                                          pad_len=pad_len,
-                                          n_goterms=self.output_dim,
-                                          channels=self.n_channels,
-                                          cmap_type=cmap_type,
-                                          cmap_thresh=cmap_thresh,
-                                          ont=ont)
+        # batch_train = get_batched_dataset(train_tfrecord_fn,
+        #                                   batch_size=batch_size,
+        #                                   pad_len=pad_len,
+        #                                   n_goterms=self.output_dim,
+        #                                   channels=self.n_channels,
+        #                                   cmap_type=cmap_type,
+        #                                   cmap_thresh=cmap_thresh,
+        #                                   ont=ont)
+        
 
-        # validation tfrecords
-        batch_valid = get_batched_dataset(valid_tfrecord_fn,
-                                          batch_size=batch_size,
-                                          pad_len=pad_len,
-                                          n_goterms=self.output_dim,
-                                          channels=self.n_channels,
-                                          cmap_type=cmap_type,
-                                          cmap_thresh=cmap_thresh,
-                                          ont=ont)
+        # # validation tfrecords
+        # batch_valid = get_batched_dataset(valid_tfrecord_fn,
+        #                                   batch_size=batch_size,
+        #                                   pad_len=pad_len,
+        #                                   n_goterms=self.output_dim,
+        #                                   channels=self.n_channels,
+        #                                   cmap_type=cmap_type,
+        #                                   cmap_thresh=cmap_thresh,
+        #                                   ont=ont)
+        
+        # Manually load numpy arrays
+        cmap = np.load('./pt_tensors/input_cmap.npy')
+        seq = np.load('./pt_tensors/input_seq.npy')
+        label = np.load('./pt_tensors/labels.npy')
+        
+        cmaps = tf.convert_to_tensor(cmap, dtype=tf.float32)
+        seqs = tf.convert_to_tensor(seq, dtype=tf.float32)
+        labels = tf.convert_to_tensor(label, dtype=tf.float32)
+
+        # Check if seqs are same
+        # print(seqs[0][0])
+        # print(seqs[0][1])
+        # print(seqs[0][2])
+
+        ptTensor = tf.data.Dataset.from_tensor_slices(({'cmap': tf.expand_dims(cmaps, axis=0), 'seq': tf.expand_dims(seqs, axis=0)}, tf.expand_dims(labels, axis=0)))
+        # ptTensor = ptTensor.take(1)
+
+        # test2 = batch_train.take(1)
+        # test3 = batch_valid.take(1)
 
         # early stopping
         es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=5)
@@ -158,12 +183,15 @@ class DeepFRI(object):
 
         # fit model
         history = self.model.fit(
-            batch_train,
-            epochs=epochs,
-            validation_data=batch_valid,
-            steps_per_epoch=n_train_records//batch_size,
-            validation_steps=n_valid_records//batch_size,
-            callbacks=[es, mc])
+            ptTensor,
+            epochs=1,
+            validation_data=ptTensor,
+            steps_per_epoch=1,
+            validation_steps=1)
+        
+        # embed_output = self.model.get_layer('AA_embedding').output
+        # m = self.model(inputs=self.model.input, outputs=embed_output)
+        # print(m.predict(test))
 
         self.history = history.history
 

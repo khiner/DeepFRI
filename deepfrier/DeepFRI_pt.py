@@ -1,11 +1,17 @@
 import os
+import sys
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import numpy as np
 
 from .layers_pt import FuncPredictor, SumPooling, GraphConv
+
+def init_weights(m):
+    if isinstance(m, nn.Linear):
+        torch.nn.init.ones_(m.weight)
 
 class DeepFRI(nn.Module):
     """ Class containing the GCN for predicting protein function. """
@@ -20,11 +26,12 @@ class DeepFRI(nn.Module):
             nn.Linear(n_channels, lm_dim, bias=False),
             nn.ReLU()
         )
+        self.input_layer.apply(init_weights)
 
         gcnn_layers = []
         input_dim = lm_dim
         for gc_dim in gc_dims:
-            gc_layer = GraphConv(input_dim, gc_dim, activation='relu')
+            gc_layer = GraphConv(input_dim, gc_dim, activation='elu')
             gcnn_layers.append(gc_layer)
             input_dim = gc_dim
         self.gcnn_layers = nn.ModuleList(gcnn_layers)
@@ -39,6 +46,7 @@ class DeepFRI(nn.Module):
             fc_layers.append(nn.Dropout((l + 1) * drop))
             input_dim = fc_dim
         self.fc_layers = nn.Sequential(*fc_layers)
+        self.fc_layers.apply(init_weights)
 
         self.output_layer = FuncPredictor(input_dim, output_dim)
 
@@ -48,16 +56,24 @@ class DeepFRI(nn.Module):
 
     def forward(self, input_cmap, input_seq):
         x = self.input_layer(input_seq)
+        np.save('./pt_tensors/embed_tensor', x.detach().cpu().numpy())
         gcnn_outputs = []
-        for gc_layer in self.gcnn_layers:
+        for (i, gc_layer) in enumerate(self.gcnn_layers):
             x = gc_layer([x, input_cmap])
+            np.save(f'./pt_tensors/gcnn{i}_tensor', x.detach().cpu().numpy())
             gcnn_outputs.append(x)
+        
+        np.save('./pt_tensors/gcnn_tensor', x.detach().cpu().numpy())
 
         # Concatenate along the feature dimension
         x = torch.cat(gcnn_outputs, dim=2) if len(gcnn_outputs) > 1 else gcnn_outputs[0]
         x = self.sum_pooling(x)
+        np.save('./pt_tensors/sum_tensor', x.detach().cpu().numpy())
         x = self.fc_layers(x)
+        np.save('./pt_tensors/fc_tensor', x.detach().cpu().numpy())
         out = self.output_layer(x)
+        np.save('./pt_tensors/out_tensor', out.detach().cpu().numpy())
+        sys.exit()
         return out
 
     def train_model(self, device, train_loader, valid_loader, epochs=100):
@@ -66,6 +82,9 @@ class DeepFRI(nn.Module):
             total_loss, correct_predictions, total_predictions = 0.0, 0, 0
             for i, (input_cmap, input_seq, labels) in enumerate(train_loader):
                 input_cmap, input_seq, labels = input_cmap.to(device), input_seq.to(device), labels.to(device)
+                np.save('./pt_tensors/input_cmap', input_cmap.detach().cpu().numpy())
+                np.save('./pt_tensors/input_seq', input_seq.detach().cpu().numpy())
+                np.save('./pt_tensors/labels', labels.detach().cpu().numpy())
                 labels = torch.max(labels, 1)[1]  # Convert one-hot to class indices
 
                 self.optimizer.zero_grad()
@@ -73,7 +92,7 @@ class DeepFRI(nn.Module):
                 loss = self.criterion(outputs, labels)
                 # Optional L2 regularization on only the GCNN layers
                 # for gcnn_layer in self.gcnn_layers:
-                    # loss += self.l2_reg * torch.norm(gcnn_layer.linear.weight, p=2)
+                #     loss += self.l2_reg * torch.norm(gcnn_layer.linear.weight, p=2)
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()
