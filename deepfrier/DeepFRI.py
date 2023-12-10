@@ -5,56 +5,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchmetrics.classification import MultilabelF1Score, MultilabelAUROC
-from torch_geometric.nn import GATv2Conv, GATConv
 
 import matplotlib.pyplot as plt
 import torch.onnx
 from tqdm import tqdm
-
-class GAT(nn.Module):
-    def __init__(self, input_dim, output_dim, activation, num_heads=4, alpha=0.2, reduction='concat'):
-        super().__init__()
-        self.conv1 = GATv2Conv(input_dim, 1, 4)
-        # On the Pubmed dataset, use `heads` output heads in `conv2`.
-        self.conv2 = GATv2Conv(1 * num_heads, output_dim, heads=1,
-                             concat=False)
-        # self.output_dim = output_dim
-        # self.activation = getattr(F, activation) if activation else None
-        # self.num_heads = num_heads
-        # self.reduction = reduction
-
-        # self.linear = nn.Linear(input_dim, output_dim, bias=False)
-        # self.attn_self = nn.Linear(output_dim, 1, bias=False)
-        # self.attn_nb = nn.Linear(output_dim, 1, bias=False )
-        # self.softmax = nn.Softmax(dim=2)
-        self.leaky_relu = nn.LeakyReLU(alpha)
-        
-    def forward(self, inputs):
-        X, A = inputs
-        output = self.leaky_relu(self.conv1(X, A))
-        output = self.conv2(output, A)
-        return output
-        # print(X.shape)
-        # features = [self.linear(X) for _ in range(self.num_heads)]
-        # self_attn = [self.attn_self(features[i]) for i in range(self.num_heads)]
-        # nb_attn = [self.attn_nb(features[i]) for i in range(self.num_heads)]
-        # dense = [self.leaky_relu(self_attn[i] + nb_attn[i].permute(0, 2, 1)) for i in range(self.num_heads)]
-        # mask = -10e9 * (1.0 - A)
-        # dense = [dense[i] + mask for i in range(self.num_heads)]
-
-        # self.norm_attn = [self.softmax(dense[i]) for i in range(self.num_heads)]
-        # output = [torch.bmm(self.norm_attn[i], features[i]) for i in range(self.num_heads)]
-
-        # if self.reduction == 'concat':
-        #     output = torch.cat(output, dim=2)
-        # else:
-        #     output = torch.mean(output)
-
-        # if self.activation is not None:
-        #     output = self.activation(output)
-
-        # print(output.shape)
-        # return output
 
 class GraphConv(nn.Module):
     """
@@ -103,7 +57,7 @@ class DeepFRI(nn.Module):
         gcnn_layers = []
         input_dim = lm_dim
         for gc_dim in gc_dims:
-            gc_layer = GAT(input_dim, gc_dim, activation='relu')
+            gc_layer = GraphConv(input_dim, gc_dim, activation='relu')
             gcnn_layers.append(gc_layer)
             input_dim = gc_dim
         self.gcnn_layers = nn.ModuleList(gcnn_layers)
