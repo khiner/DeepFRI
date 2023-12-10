@@ -8,6 +8,9 @@ import matplotlib.pyplot as plt
 import torch.onnx
 from tqdm import tqdm
 
+from torch_geometric.nn import GATConv
+import torch_geometric.utils as pyg_utils
+
 class GraphConv(nn.Module):
     """
     Graph Convolution Layer according to (T. Kipf and M. Welling, ICLR 2017)
@@ -38,6 +41,18 @@ class GraphConv(nn.Module):
         D_hat = torch.diag_embed(1. / (eps + A_hat.sum(dim=2).sqrt()))
         return torch.bmm(torch.bmm(D_hat, A_hat), D_hat) # Compute the normalized adjacency matrix
 
+class GATLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, num_heads=4, dropout=0.6, concat=True, use_bias=True, activation=F.relu):
+        super(GATLayer, self).__init__()
+        self.gat_conv = GATConv(in_channels, out_channels, heads=num_heads, dropout=dropout, concat=concat, bias=use_bias)
+        self.activation = activation
+
+    def forward(self, x, edge_index):
+        x = self.gat_conv(x, edge_index)
+        if self.activation:
+            x = self.activation(x)
+        return x
+
 class DeepFRI(nn.Module):
     """GCN model for predicting protein function."""
     def __init__(self, output_dim, n_channels, gc_dims=[64, 128], fc_dims=[512], lr=0.0002, drop=0.3, l2_reg=1e-4, model_name_prefix=None):
@@ -45,31 +60,34 @@ class DeepFRI(nn.Module):
         self.model_name_prefix = model_name_prefix
         self.l2_reg = l2_reg
 
+        num_heads = 4
         # Encoding layer
         lm_dim = 1024
         self.input_layer = nn.Sequential(
             nn.Linear(n_channels, lm_dim, bias=False),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Linear(lm_dim, gc_dims[0] * num_heads, bias=False)
         )
+        self.gat_layers = nn.ModuleList(
+            [GATLayer(in_channels=(gc_dims[i - 1] * num_heads if i > 0 else gc_dims[0] * num_heads),
+                      out_channels=gc_dim,
+                      num_heads=num_heads,
+                      dropout=drop,
+                      concat=True,
+                      use_bias=True,
+                      activation='relu') for i, gc_dim in enumerate(gc_dims)])
 
-        gcnn_layers = []
-        input_dim = lm_dim
-        for gc_dim in gc_dims:
-            gc_layer = GraphConv(input_dim, gc_dim, activation='relu')
-            gcnn_layers.append(gc_layer)
-            input_dim = gc_dim
-        self.gcnn_layers = nn.ModuleList(gcnn_layers)
-        input_dim = sum(gc_dims) # GCNN layers are concatenated
-
+        final_dim = gc_dims[-1] * num_heads if gc_dims else n_channels
+    
+        # Fully connected layers
         fc_layers = []
         for l, fc_dim in enumerate(fc_dims):
-            fc_layers.append(nn.Linear(input_dim, fc_dim))
+            fc_layers.append(nn.Linear(final_dim if l == 0 else fc_dims[l-1], fc_dim))
             fc_layers.append(nn.ReLU())
             fc_layers.append(nn.Dropout((l + 1) * drop))
-            input_dim = fc_dim
         self.fc_layers = nn.Sequential(*fc_layers)
 
-        self.output_layer = nn.Linear(input_dim, output_dim) # PyTorch's BCEWithLogitsLoss expects logits
+        self.output_layer = nn.Linear(fc_dims[-1] if fc_dims else final_dim, output_dim) # PyTorch's BCEWithLogitsLoss expects logits
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, betas=(0.95, 0.99), weight_decay=self.l2_reg)
         self.criterion = nn.BCEWithLogitsLoss()
@@ -77,14 +95,12 @@ class DeepFRI(nn.Module):
 
     def forward(self, input_cmap, input_seq):
         x = self.input_layer(input_seq)
-        gcnn_outputs = []
-        for gc_layer in self.gcnn_layers:
-            x = gc_layer([x, input_cmap])
-            gcnn_outputs.append(x)
+        edge_index, _ = pyg_utils.dense_to_sparse(input_cmap)  # Convert adjacency matrix to edge indices
 
-        # Concatenate along the feature dimension
-        x = torch.cat(gcnn_outputs, dim=2) if len(gcnn_outputs) > 1 else gcnn_outputs[0]
-        x = x.sum(dim=1)
+        for gat_layer in self.gat_layers:
+            x = gat_layer(x, edge_index)
+
+        x = x.sum(dim=1)  # Sum over nodes
         x = self.fc_layers(x)
         out = self.output_layer(x)
         return out
