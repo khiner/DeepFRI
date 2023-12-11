@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torchmetrics.classification import MultilabelF1Score, MultilabelAUROC
+from torchmetrics.classification import MultilabelAUROC
 
 import matplotlib.pyplot as plt
 import torch.onnx
@@ -73,7 +73,7 @@ class DeepFRI(nn.Module):
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, betas=(0.95, 0.99), weight_decay=self.l2_reg)
         self.criterion = nn.BCEWithLogitsLoss()
-        self.mlroc = MultilabelAUROC(num_labels=489, average='micro')
+        self.mlroc = MultilabelAUROC(num_labels=489, average='micro', thresholds=400) # Thresholding reduces memory consumption dramatically
         self.history = {'loss': [], 'val_loss': [], 'auroc':[], 'val_auroc':[], 'acc': [], 'val_acc': []}
 
     def forward(self, input_cmap, input_seq):
