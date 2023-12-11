@@ -32,13 +32,11 @@ class GraphConv(nn.Module):
             x = self.activation(x)
         return x
 
+    # Compute the normalized adjacency matrix
     def _normalize(self, A, eps=1e-6):
-        batch_size, n = A.shape[0], A.shape[1]
-        A_hat = A.clone()
-        A_hat.diagonal(dim1=1, dim2=2).fill_(0) # Remove self-loops
-        A_hat += torch.eye(n, device=A.device).unsqueeze(0).expand(batch_size, -1, -1) # Add self-loops
-        D_hat = torch.diag_embed(1. / (eps + A_hat.sum(dim=2).sqrt()))
-        return torch.bmm(torch.bmm(D_hat, A_hat), D_hat) # Compute the normalized adjacency matrix
+        torch.diagonal(A, dim1=1, dim2=2).fill_(1)  # Set self-loops
+        D_hat = torch.diag_embed(1. / (eps + A.sum(dim=2).sqrt()))
+        return torch.bmm(torch.bmm(D_hat, A), D_hat)
 
 class DeepFRI(nn.Module):
     """GCN model for predicting protein function."""
