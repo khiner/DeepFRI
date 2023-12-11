@@ -96,7 +96,7 @@ class DeepFRI(nn.Module):
 
         outputs = self(cmap, seq)
         loss = self.criterion(outputs, labels)
-        auroc = self.mlroc(outputs, labels.long())
+        auroc = self.mlroc(outputs, labels.long()).item()
         return outputs, labels, loss, auroc
 
     def calculate_accuracy(self, outputs, labels):
@@ -188,3 +188,12 @@ class DeepFRI(nn.Module):
         plt.xlabel('epoch')
         plt.legend(['train', 'validation'], loc='upper left')
         plt.savefig(f'{self.model_name_prefix}_model_accuracy.png', bbox_inches='tight')
+
+        plt.figure()
+        plt.plot(self.history['auroc'], '-')
+        plt.plot(self.history['val_auroc'], '-')
+        plt.title('model AUROC')
+        plt.ylabel('AUROC')
+        plt.xlabel('epoch')
+        plt.legend(['train', 'validation'], loc='upper left')
+        plt.savefig(f'{self.model_name_prefix}_model_auroc.png', bbox_inches='tight')
